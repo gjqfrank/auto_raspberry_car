@@ -1,14 +1,16 @@
 import os
+import sys
 import cv2
 import time
 import argparse
 import requests
 import torch
+
 import model.detector
 import utils.utils
 
-stream_url = "http://172.20.10.3:8080/?action=stream"    # 这里请替换为你的树莓派 IP 地址
-control_url = "http://172.20.10.3:5000/control"          # 这里请替换为你的树莓派 IP 地址
+stream_url = "http://172.20.10.2:8080/?action=stream"    # 这里请替换为你的树莓派 IP 地址
+control_url = "http://172.20.10.2:5000/control"          # 这里请替换为你的树莓派 IP 地址
 cap = cv2.VideoCapture(stream_url)                       # 获取视频的输入源，也就是这个网址
 
 cfg = utils.utils.load_datafile('data/coco.data')
