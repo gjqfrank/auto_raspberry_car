@@ -44,6 +44,10 @@ LANE_GENTLE_LEFT_THRESHOLD = -0.15                          # 缓左转阈值
 LANE_GENTLE_RIGHT_THRESHOLD = 0.15                          # 缓右转阈值
 LANE_SHARP_RIGHT_THRESHOLD = 0.5                            # 急右转阈值
 
+# 车道检测形态学操作参数
+LANE_KERNEL_SIZE = (5, 5)                                   # 形态学操作的卷积核大小
+LANE_ROI_START_RATIO = 0.5                                  # ROI 起始位置比例（从上到下的比例）
+
 # ============================================================================
 # 行人安全距离参数 (Person Safety Distance Parameters)
 # ============================================================================
@@ -73,6 +77,9 @@ TRAFFIC_LIGHT_UPPER_YELLOW = np.array([35, 255, 255])
 TRAFFIC_LIGHT_RED_RATIO_THRESHOLD = 0.15                    # 红色像素占比阈值
 TRAFFIC_LIGHT_GREEN_RATIO_THRESHOLD = 0.15                  # 绿色像素占比阈值
 TRAFFIC_LIGHT_YELLOW_RATIO_THRESHOLD = 0.12                 # 黄色像素占比阈值
+
+# 红绿灯类别 (Traffic Light Categories)
+TRAFFIC_LIGHT_CATEGORIES = {"traffic light", "traffic_light", "light"}  # 检测模型中对应的类别名称
 
 # ============================================================================
 # 控制命令定义 (Control Commands)
@@ -113,7 +120,7 @@ Priority 2 (High): 🚦 Traffic Light Detection
 Priority 3 (Medium): 👤 Person Detection
   - 检测到行人时停止
   
-Priority 4 (Lowest): ���️  Lane Following
+Priority 4 (Lowest): 🛣️  Lane Following
   - 默认的车道跟踪模式
 """
 
