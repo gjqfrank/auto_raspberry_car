@@ -8,12 +8,13 @@ import utils.utils
 from traffic_light_detector import TrafficLightDetector
 from person_detector import PersonDetector
 from lane_follower import LaneFollower
+from person_safety_detector import PersonSafetyDetector
 
 stream_url = "http://172.20.10.2:8080/?action=stream"
 control_url = "http://172.20.10.2:5000/control"
  
 state_lock = Lock()
-exit_flag = False
+exit_flag = {'flag': False}  # Use dict to allow modification in threads
 
 
 class TrafficLightThread:
@@ -24,7 +25,6 @@ class TrafficLightThread:
         self.detector = TrafficLightDetector(control_url, state_lock)
     
     def run(self, cap, LABEL_NAMES):
-        global exit_flag
         self.detector.run(cap, LABEL_NAMES)
 
 
@@ -36,8 +36,21 @@ class PersonDetectionThread:
         self.detector = PersonDetector(control_url, state_lock)
     
     def run(self, cap, LABEL_NAMES):
-        global exit_flag
         self.detector.run(cap, LABEL_NAMES)
+
+
+class PersonSafetyThread:
+    """Thread for person safety distance monitoring"""
+    
+    def __init__(self, state_lock, cfg, model, device):
+        self.state_lock = state_lock
+        self.cfg = cfg
+        self.model = model
+        self.device = device
+        self.detector = PersonSafetyDetector(control_url, state_lock)
+    
+    def run(self, cap, LABEL_NAMES):
+        self.detector.run(cap, self.cfg, self.model, self.device, LABEL_NAMES, exit_flag)
 
 
 class LaneFollowingThread:
@@ -49,9 +62,8 @@ class LaneFollowingThread:
         self.cfg = utils.utils.load_datafile('data/coco.data')
     
     def run(self, cap):
-        global exit_flag
         
-        while not exit_flag:
+        while not exit_flag['flag']:
             ret, frame = cap.read()
             if not ret:
                 break
@@ -64,8 +76,13 @@ class LaneFollowingThread:
             with self.state_lock:
                 self.follower.red_light_detected = getattr(self, 'red_light_detected', False)
                 self.follower.person_detected = getattr(self, 'person_detected', False)
+                # Get person safety status from shared state
+                self.follower.person_in_danger_zone = getattr(self, 'person_in_danger_zone', False)
             
-            if self.follower.should_execute(self.follower.red_light_detected, self.follower.person_detected):
+            # Check priority: red light > person safety > person detection > lane following
+            if self.follower.should_execute(self.follower.red_light_detected, 
+                                           self.follower.person_detected,
+                                           getattr(self.follower, 'person_in_danger_zone', False)):
                 self.follower.send_command(command)
                 print(f"[LANE] {status} | Cmd: {command} | Curv: {curv:.2f}")
                 self.follower.last_lane_command = command
@@ -78,6 +95,9 @@ class LaneFollowingThread:
             
             if self.follower.red_light_detected:
                 mode_text = "[RED LIGHT]"
+                color = (0, 0, 255)
+            elif getattr(self.follower, 'person_in_danger_zone', False):
+                mode_text = "[PERSON TOO CLOSE - EMERGENCY STOP]"
                 color = (0, 0, 255)
             elif self.follower.person_detected:
                 mode_text = "[PERSON DETECTED]"
@@ -94,15 +114,14 @@ class LaneFollowingThread:
             cv2.imshow('Lane Detection | Mask', combined)
             
             if cv2.waitKey(1) & 0xFF == ord('q'):
-                exit_flag = True
+                exit_flag['flag'] = True
                 break
 
 
 def main():
-    global exit_flag
     
     print("=" * 70)
-    print("Multi-mode vehicle control system initialization")
+    print("Multi-mode vehicle control system with safety detection")
     print("=" * 70)
     
     print("\nLoading model...")
@@ -128,37 +147,44 @@ def main():
         for line in f.readlines():
             LABEL_NAMES.append(line.strip())
     
-    print("\nStarting three threads...")
+    print("\nStarting detection threads...")
     print("-" * 70)
-    print("Priority 1 (Highest): Traffic Light Mode - Continuous monitoring")
+    print("Priority 1 (Highest): Person Safety - Distance monitoring")
+    print("  - Person TOO CLOSE (>50% area): EMERGENCY STOP")
+    print("  - Person moves away (<35% area): Resume normal operation")
+    print("Priority 2 (High): Traffic Light Mode - Continuous monitoring")
     print("  - RED LIGHT: Stop car")
     print("  - GREEN LIGHT: Continue driving")
-    print("Priority 2 (Medium): Person Detection Mode")
+    print("Priority 3 (Medium): Person Detection Mode")
     print("  - Person detected: Stop car")
     print("  - No person: Continue lane following")
-    print("Priority 3 (Lowest): Lane Following Mode")
+    print("Priority 4 (Lowest): Lane Following Mode")
     print("-" * 70)
     print("Press 'q' to exit\n")
     
     traffic_thread_obj = TrafficLightThread(state_lock)
     person_thread_obj = PersonDetectionThread(state_lock)
+    safety_thread_obj = PersonSafetyThread(state_lock, cfg, model, device)
     lane_thread_obj = LaneFollowingThread(state_lock)
     
     traffic_thread = threading.Thread(target=traffic_thread_obj.run, args=(cap, LABEL_NAMES), daemon=True)
     person_thread = threading.Thread(target=person_thread_obj.run, args=(cap, LABEL_NAMES), daemon=True)
+    safety_thread = threading.Thread(target=safety_thread_obj.run, args=(cap, LABEL_NAMES), daemon=True)
     lane_thread = threading.Thread(target=lane_thread_obj.run, args=(cap,), daemon=True)
     
     traffic_thread.start()
     person_thread.start()
+    safety_thread.start()
     lane_thread.start()
     
     try:
         traffic_thread.join()
         person_thread.join()
+        safety_thread.join()
         lane_thread.join()
     except KeyboardInterrupt:
         print("\nProgram interrupted")
-        exit_flag = True
+        exit_flag['flag'] = True
     
     cap.release()
     cv2.destroyAllWindows()
