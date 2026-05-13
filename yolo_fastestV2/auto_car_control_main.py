@@ -8,7 +8,7 @@ import utils.utils
 from traffic_light_detector import TrafficLightDetector
 # from person_detector import PersonDetector
 from lane_follower import LaneFollower
-from yolo_fastestV2.person_safety_detector import PersonSafetyDetector
+from person_safety_detector import PersonSafetyDetector
 
 stream_url = "http://172.20.10.2:8080/?action=stream"
 control_url = "http://172.20.10.2:5000/control"
