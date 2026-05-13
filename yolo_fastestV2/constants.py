@@ -74,6 +74,9 @@ TRAFFIC_LIGHT_RED_RATIO_THRESHOLD = 0.15                    # 红色像素占比
 TRAFFIC_LIGHT_GREEN_RATIO_THRESHOLD = 0.15                  # 绿色像素占比阈值
 TRAFFIC_LIGHT_YELLOW_RATIO_THRESHOLD = 0.12                 # 黄色像素占比阈值
 
+# 红绿灯类别 (Traffic Light Categories)
+TRAFFIC_LIGHT_CATEGORIES = {"traffic light", "traffic_light", "light"}  # 检测模型中对应的类别名称
+
 # ============================================================================
 # 控制命令定义 (Control Commands)
 # ============================================================================
@@ -113,7 +116,7 @@ Priority 2 (High): 🚦 Traffic Light Detection
 Priority 3 (Medium): 👤 Person Detection
   - 检测到行人时停止
   
-Priority 4 (Lowest): ���️  Lane Following
+Priority 4 (Lowest): ️️  Lane Following
   - 默认的车道跟踪模式
 """
 
