@@ -54,9 +54,9 @@ class TrafficLightThread:
         self.state_lock = state_lock
         self.detector = TrafficLightDetector(CONTROL_URL, state_lock)
     
-    def run(self, cap, LABEL_NAMES):
+    def run(self, cap, LABEL_NAMES, exit_flag):
         """Run traffic light detection in thread"""
-        self.detector.run(cap, LABEL_NAMES)
+        self.detector.run(cap, LABEL_NAMES, exit_flag)
 
 
 class PersonSafetyThread:
@@ -69,9 +69,9 @@ class PersonSafetyThread:
         self.device = device
         self.detector = PersonSafetyDetector(CONTROL_URL, state_lock)
     
-    def run(self, cap, LABEL_NAMES):
+    def run(self, cap, LABEL_NAMES, exit_flag):
         """Run person safety detection in thread"""
-        self.detector.run(cap, self.cfg, self.detector_model, self.device, LABEL_NAMES)
+        self.detector.run(cap, self.cfg, self.detector_model, self.device, LABEL_NAMES, exit_flag)
 
 
 class LaneFollowingThread:
@@ -82,7 +82,7 @@ class LaneFollowingThread:
         self.follower = LaneFollower(CONTROL_URL, state_lock)
         self.cfg = utils.utils.load_datafile(CONFIG_FILE)
     
-    def run(self, cap):
+    def run(self, cap, exit_flag):
         """Run lane following detection in thread"""
         
         while not exit_flag['flag']:
@@ -111,31 +111,35 @@ class LaneFollowingThread:
                 self.follower.last_lane_command = command
             
             if SHOW_VISUAL_OUTPUT:
-                display_frame = frame.copy()
-                cv2.putText(display_frame, f"Curvature: {curvature:.2f}", (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(display_frame, f"Offset: {offset:.2f}", (10, 70), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                
-                if self.follower.red_light_detected:
-                    mode_text = "[RED LIGHT - STOP]"
-                    color = (0, 0, 255)
-                elif getattr(self.follower, 'person_in_danger_zone', False):
-                    mode_text = "[PERSON TOO CLOSE - EMERGENCY STOP]"
-                    color = (0, 0, 255)
-                elif self.follower.person_detected:
-                    mode_text = "[PERSON DETECTED]"
-                    color = (0, 0, 255)
-                else:
-                    mode_text = "[LANE MODE]"
-                    color = (0, 255, 0)
-                
-                cv2.putText(display_frame, mode_text, (10, 110), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-                
-                display_mask = cv2.cvtColor(lane_mask, cv2.COLOR_GRAY2BGR)
-                combined = cv2.hstack([display_frame, display_mask])
-                cv2.imshow('Lane Detection | Mask', combined)
+                try:
+                    display_frame = frame.copy()
+                    cv2.putText(display_frame, f"Curvature: {curvature:.2f}", (10, 30), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(display_frame, f"Offset: {offset:.2f}", (10, 70), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    
+                    if self.follower.red_light_detected:
+                        mode_text = "[RED LIGHT - STOP]"
+                        color = (0, 0, 255)
+                    elif getattr(self.follower, 'person_in_danger_zone', False):
+                        mode_text = "[PERSON TOO CLOSE - EMERGENCY STOP]"
+                        color = (0, 0, 255)
+                    elif self.follower.person_detected:
+                        mode_text = "[PERSON DETECTED]"
+                        color = (0, 0, 255)
+                    else:
+                        mode_text = "[LANE MODE]"
+                        color = (0, 255, 0)
+                    
+                    cv2.putText(display_frame, mode_text, (10, 110), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                    
+                    display_mask = cv2.cvtColor(lane_mask, cv2.COLOR_GRAY2BGR)
+                    combined = cv2.hstack([display_frame, display_mask])
+                    cv2.imshow('Lane Detection | Mask', combined)
+                except Exception as e:
+                    if DEBUG_MODE:
+                        print(f"[LANE] Warning: Cannot display window - {str(e)}")
             
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 exit_flag['flag'] = True
@@ -227,19 +231,19 @@ def main():
     
     traffic_thread = threading.Thread(
         target=traffic_thread_obj.run, 
-        args=(cap, LABEL_NAMES), 
+        args=(cap, LABEL_NAMES, exit_flag), 
         daemon=True,
         name="TrafficLightDetector"
     )
     safety_thread = threading.Thread(
         target=safety_thread_obj.run, 
-        args=(cap, LABEL_NAMES), 
+        args=(cap, LABEL_NAMES, exit_flag), 
         daemon=True,
         name="PersonSafetyDetector"
     )
     lane_thread = threading.Thread(
         target=lane_thread_obj.run, 
-        args=(cap,), 
+        args=(cap, exit_flag), 
         daemon=True,
         name="LaneFollower"
     )
