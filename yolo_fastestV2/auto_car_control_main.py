@@ -62,16 +62,16 @@ class TrafficLightThread:
 class PersonSafetyThread:
     """Thread for person safety distance monitoring"""
     
-    def __init__(self, state_lock, cfg, model, device):
+    def __init__(self, state_lock, cfg, detector_model, device):
         self.state_lock = state_lock
         self.cfg = cfg
-        self.model = model
+        self.detector_model = detector_model
         self.device = device
         self.detector = PersonSafetyDetector(CONTROL_URL, state_lock)
     
     def run(self, cap, LABEL_NAMES):
         """Run person safety detection in thread"""
-        self.detector.run(cap, self.cfg, self.model, self.device, LABEL_NAMES)
+        self.detector.run(cap, self.cfg, self.detector_model, self.device, LABEL_NAMES)
 
 
 class LaneFollowingThread:
@@ -190,9 +190,9 @@ def main():
     assert os.path.exists(WEIGHTS_PATH), f"❌ Model weights not found: {WEIGHTS_PATH}"
     
     device = DEVICE
-    model = model.detector.Detector(cfg["classes"], cfg["anchor_num"], True).to(device)
-    model.load_state_dict(torch.load(WEIGHTS_PATH, map_location=device))
-    model.eval()
+    detector_model = model.detector.Detector(cfg["classes"], cfg["anchor_num"], True).to(device)
+    detector_model.load_state_dict(torch.load(WEIGHTS_PATH, map_location=device))
+    detector_model.eval()
     print("✅ Model loaded successfully")
     
     # ========================================================================
@@ -222,7 +222,7 @@ def main():
     print("-" * 80)
     
     traffic_thread_obj = TrafficLightThread(state_lock)
-    safety_thread_obj = PersonSafetyThread(state_lock, cfg, model, device)
+    safety_thread_obj = PersonSafetyThread(state_lock, cfg, detector_model, device)
     lane_thread_obj = LaneFollowingThread(state_lock)
     
     traffic_thread = threading.Thread(
