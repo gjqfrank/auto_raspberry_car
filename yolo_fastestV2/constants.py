@@ -82,7 +82,7 @@ TRAFFIC_LIGHT_YELLOW_RATIO_THRESHOLD = 0.12                 # 黄色像素占比
 TRAFFIC_LIGHT_CATEGORIES = {"traffic light", "traffic_light", "light"}  # 检测模型中对应的类别名称
 
 # ============================================================================
-# 控制命令定义 (Control Commands)
+# 控制��令定义 (Control Commands)
 # ============================================================================
 COMMAND_FORWARD = "FORWARD"                                 # 前进
 COMMAND_LEFT = "LEFT"                                       # 左转
@@ -96,6 +96,7 @@ COMMAND_CONTINUE = "CONTINUE"                               # 继续
 DEBUG_MODE = True                                           # 调试模式开关
 VERBOSE_LOGGING = True                                      # 详细日志开关
 LOG_EVERY_N_FRAMES = 30                                     # 每 N 帧打印一次日志
+LOG_INTERVAL = 30                                           # 日志输出间隔（帧数）
 
 # ============================================================================
 # 显示参数 (Display Parameters)
@@ -104,6 +105,7 @@ DISPLAY_LANE_MASK = True                                    # 显示车道掩码
 DISPLAY_DETECTION_BOXES = True                              # 显示检测框
 DISPLAY_MODE_INFO = True                                    # 显示模式信息
 DISPLAY_STATS = True                                        # 显示统计信息
+SHOW_VISUAL_OUTPUT = True                                   # 显示视觉输出
 
 # ============================================================================
 # 优先级定义 (Priority Levels)
