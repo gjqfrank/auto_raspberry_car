@@ -6,7 +6,7 @@ from threading import Lock
 import model.detector
 import utils.utils
 from traffic_light_detector import TrafficLightDetector
-from person_detector import PersonDetector
+# from person_detector import PersonDetector
 from lane_follower import LaneFollower
 from yolo_fastestV2.person_safety_detector import PersonSafetyDetector
 

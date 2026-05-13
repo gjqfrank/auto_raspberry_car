@@ -19,7 +19,7 @@ class PersonDetector:
         
         self.device = "cpu"
         self.model = model.detector.Detector(self.cfg["classes"], self.cfg["anchor_num"], True).to(self.device)
-        self.model.load_state_dict(torch.load(self.weights, map_location=device))
+        self.model.load_state_dict(torch.load(self.weights, map_location=self.device))
         self.model.eval()
         
         self.person_detected = False
