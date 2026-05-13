@@ -8,7 +8,7 @@ import utils.utils
 from traffic_light_detector import TrafficLightDetector
 from person_detector import PersonDetector
 from lane_follower import LaneFollower
-from person_safety_detector import PersonSafetyDetector
+from yolo_fastestV2.person_safety_detector import PersonSafetyDetector
 
 stream_url = "http://172.20.10.2:8080/?action=stream"
 control_url = "http://172.20.10.2:5000/control"
@@ -28,15 +28,15 @@ class TrafficLightThread:
         self.detector.run(cap, LABEL_NAMES)
 
 
-class PersonDetectionThread:
-    """Thread for person detection"""
+# class PersonDetectionThread:
+#     """Thread for person detection"""
     
-    def __init__(self, state_lock):
-        self.state_lock = state_lock
-        self.detector = PersonDetector(control_url, state_lock)
+#     def __init__(self, state_lock):
+#         self.state_lock = state_lock
+#         self.detector = PersonDetector(control_url, state_lock)
     
-    def run(self, cap, LABEL_NAMES):
-        self.detector.run(cap, LABEL_NAMES)
+#     def run(self, cap, LABEL_NAMES):
+#         self.detector.run(cap, LABEL_NAMES)
 
 
 class PersonSafetyThread:
@@ -163,23 +163,23 @@ def main():
     print("Press 'q' to exit\n")
     
     traffic_thread_obj = TrafficLightThread(state_lock)
-    person_thread_obj = PersonDetectionThread(state_lock)
+    # person_thread_obj = PersonDetectionThread(state_lock)
     safety_thread_obj = PersonSafetyThread(state_lock, cfg, model, device)
     lane_thread_obj = LaneFollowingThread(state_lock)
     
     traffic_thread = threading.Thread(target=traffic_thread_obj.run, args=(cap, LABEL_NAMES), daemon=True)
-    person_thread = threading.Thread(target=person_thread_obj.run, args=(cap, LABEL_NAMES), daemon=True)
+    # person_thread = threading.Thread(target=person_thread_obj.run, args=(cap, LABEL_NAMES), daemon=True)
     safety_thread = threading.Thread(target=safety_thread_obj.run, args=(cap, LABEL_NAMES), daemon=True)
     lane_thread = threading.Thread(target=lane_thread_obj.run, args=(cap,), daemon=True)
     
     traffic_thread.start()
-    person_thread.start()
+    # person_thread.start()
     safety_thread.start()
     lane_thread.start()
     
     try:
         traffic_thread.join()
-        person_thread.join()
+        # person_thread.join()
         safety_thread.join()
         lane_thread.join()
     except KeyboardInterrupt:
