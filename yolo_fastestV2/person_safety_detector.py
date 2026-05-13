@@ -1,3 +1,4 @@
+import os
 import cv2
 import torch
 import numpy as np
@@ -7,6 +8,20 @@ from threading import Lock
 import model.detector
 import utils.utils
 from collections import deque
+from constants import (
+    DANGER_DISTANCE_THRESHOLD,
+    SAFE_DISTANCE_THRESHOLD,
+    PERSON_SAFETY_MIN_COMMAND_INTERVAL,
+    PERSON_SAFETY_DISTANCE_HISTORY_SIZE,
+    NMS_CONF_THRESHOLD,
+    NMS_IOU_THRESHOLD,
+    COMMAND_STOP,
+    CONFIG_FILE,
+    WEIGHTS_PATH,
+    DEVICE,
+    LOG_EVERY_N_FRAMES,
+    DEBUG_MODE,
+)
 
 
 class PersonSafetyDetector:
@@ -22,18 +37,18 @@ class PersonSafetyDetector:
         self.state_lock = state_lock
         
         # Safety parameters (as percentage of frame area)
-        self.DANGER_DISTANCE_THRESHOLD = 0.50      # 50% of frame = too close, STOP
-        self.SAFE_DISTANCE_THRESHOLD = 0.35        # 35% of frame = safe distance
+        self.DANGER_DISTANCE_THRESHOLD = DANGER_DISTANCE_THRESHOLD
+        self.SAFE_DISTANCE_THRESHOLD = SAFE_DISTANCE_THRESHOLD
         
         # State tracking
         self.person_in_danger_zone = False
         self.person_detected = False
         self.current_person_distance = 0.0
-        self.distance_history = deque(maxlen=5)    # Smooth distance readings
+        self.distance_history = deque(maxlen=PERSON_SAFETY_DISTANCE_HISTORY_SIZE)
         
         # Performance monitoring
         self.last_command_time = 0
-        self.min_command_interval = 0.05  # Minimum 50ms between commands
+        self.min_command_interval = PERSON_SAFETY_MIN_COMMAND_INTERVAL
         self.last_command = None
         
         # Debug info
@@ -111,10 +126,11 @@ class PersonSafetyDetector:
             self.last_command_time = current_time
             return response.status_code == 200
         except Exception as e:
-            print(f"[SAFETY] Error sending command: {str(e)}")
+            if DEBUG_MODE:
+                print(f"[SAFETY] Error sending command: {str(e)}")
             return False
     
-    def run(self, cap, cfg, model, device, LABEL_NAMES):
+    def run(self, cap, cfg, model, device, LABEL_NAMES, exit_flag):
         """
         Main detection loop for person safety monitoring
         
@@ -124,9 +140,8 @@ class PersonSafetyDetector:
             model: YOLO detector model
             device: Torch device
             LABEL_NAMES: List of class names
+            exit_flag: Exit flag from main thread
         """
-        global exit_flag
-        from auto_car_control_main import exit_flag as global_exit_flag
         
         print("[SAFETY] Person safety detector started")
         print(f"[SAFETY] Danger zone threshold: {self.DANGER_DISTANCE_THRESHOLD*100:.0f}%")
@@ -134,10 +149,11 @@ class PersonSafetyDetector:
         
         target_categories = ["person"]
         
-        while not global_exit_flag:
+        while not exit_flag.get('flag', False):
             ret, frame = cap.read()
             if not ret:
-                print("[SAFETY] Failed to read frame")
+                if DEBUG_MODE:
+                    print("[SAFETY] Failed to read frame")
                 break
             
             self.frame_count += 1
@@ -156,26 +172,27 @@ class PersonSafetyDetector:
             
             # Post-processing
             output = utils.utils.handel_preds(preds, cfg, device)
-            output_boxes = utils.utils.non_max_suppression(output, conf_thres=0.3, iou_thres=0.4)
+            output_boxes = utils.utils.non_max_suppression(output, conf_thres=NMS_CONF_THRESHOLD, iou_thres=NMS_IOU_THRESHOLD)
             
             # Process detections
             self.person_detected = False
             max_distance = 0.0
             scale_h, scale_w = h / cfg["height"], w / cfg["width"]
             
-            for box in output_boxes[0]:
-                box = box.tolist()
-                obj_score = box[4]
-                category = LABEL_NAMES[int(box[5])]
-                
-                if category in target_categories:
-                    self.person_detected = True
+            if len(output_boxes[0]) > 0:
+                for box in output_boxes[0]:
+                    box = box.tolist()
+                    obj_score = box[4]
+                    category = LABEL_NAMES[int(box[5])]
                     
-                    # Calculate distance to person
-                    distance = self.calculate_person_distance_ratio(
-                        box, h, w, cfg["height"]
-                    )
-                    max_distance = max(max_distance, distance)
+                    if category in target_categories:
+                        self.person_detected = True
+                        
+                        # Calculate distance to person
+                        distance = self.calculate_person_distance_ratio(
+                            box, h, w, cfg["height"]
+                        )
+                        max_distance = max(max_distance, distance)
             
             # Update state with smoothed distance
             if self.person_detected:
@@ -190,7 +207,7 @@ class PersonSafetyDetector:
                 if not self.person_in_danger_zone:
                     self.person_in_danger_zone = True
                     print(f"[SAFETY] ALERT! Person in danger zone - Distance: {self.current_person_distance:.2%}")
-                    self.send_command("STOP")
+                    self.send_command(COMMAND_STOP)
                 self.danger_zone_frames += 1
             
             # STATE: Person leaves danger zone
@@ -211,8 +228,8 @@ class PersonSafetyDetector:
             with self.state_lock:
                 self.person_in_danger_zone = self.person_in_danger_zone
             
-            # Logging every 30 frames
-            if self.frame_count % 30 == 0:
+            # Logging every N frames
+            if self.frame_count % LOG_EVERY_N_FRAMES == 0 and DEBUG_MODE:
                 status = "DANGER ZONE" if self.person_in_danger_zone else "SAFE"
                 print(f"[SAFETY] Frame {self.frame_count} | Person: {self.person_detected} | "
                       f"Distance: {self.current_person_distance:.2%} | Status: {status}")
