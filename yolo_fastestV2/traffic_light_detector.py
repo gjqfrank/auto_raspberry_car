@@ -38,6 +38,7 @@ from constants import (
     COMMAND_STOP,
     COMMAND_CONTINUE,
     DEBUG_MODE,
+    SHOW_VISUAL_OUTPUT,
 )
 
 
@@ -232,20 +233,21 @@ class TrafficLightDetector:
         """Check if traffic light command should be executed"""
         return light_color is not None
     
-    def run(self, cap, LABEL_NAMES):
+    def run(self, cap, LABEL_NAMES, exit_flag):
         """
         Main detection loop for traffic light monitoring
         
         Args:
             cap: Video capture object
             LABEL_NAMES: List of class names
+            exit_flag: Dict flag to signal thread exit {'flag': bool}
         """
         print("[TRAFFIC LIGHT] Starting traffic light detection thread...")
         print(f"[TRAFFIC LIGHT] Red threshold: {self.red_ratio_threshold:.2%}")
         print(f"[TRAFFIC LIGHT] Yellow threshold: {self.yellow_ratio_threshold:.2%}")
         print(f"[TRAFFIC LIGHT] Green threshold: {self.green_ratio_threshold:.2%}")
         
-        while True:
+        while not exit_flag['flag']:
             ret, frame = cap.read()
             if not ret:
                 print("[TRAFFIC LIGHT] Failed to read frame - exiting")
@@ -331,11 +333,17 @@ class TrafficLightDetector:
                 
                 cv2.putText(frame, '%.2f' % obj_score, (x1, y1 - 5), 0, 0.7, (0, 255, 0), 2)
             
-            # Display frame
-            cv2.imshow('Traffic Light Detection', frame)
+            # Display frame (only if visual output is enabled)
+            if SHOW_VISUAL_OUTPUT:
+                try:
+                    cv2.imshow('Traffic Light Detection', frame)
+                except Exception as e:
+                    print(f"[TRAFFIC LIGHT] Warning: Cannot display window - {str(e)}")
+                    print("[TRAFFIC LIGHT] Running in headless mode")
             
             # Exit on 'q' key
             if cv2.waitKey(1) & 0xFF == ord('q'):
+                exit_flag['flag'] = True
                 break
     
     def get_state(self):
