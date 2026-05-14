@@ -153,7 +153,10 @@ class LaneFollowingThread:
                     if DEBUG_MODE:
                         print(f"[LANE] Warning: Cannot display window - {str(e)}")
             
+            # Check for 'q' key press to exit
             if cv2.waitKey(1) & 0xFF == ord('q'):
+                if DEBUG_MODE:
+                    print("[LANE] 'q' key detected - initiating shutdown")
                 exit_flag['flag'] = True
                 break
 
