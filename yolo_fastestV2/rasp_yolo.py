@@ -17,7 +17,7 @@ cfg = utils.utils.load_datafile('data/coco.data')
 weights = 'modelzoo/coco2017-0.241078ap-model.pth'
 assert os.path.exists(weights), "请指定正确的模型路径"
 
-target_categories = ["person"]                           # 我们这里要追踪人，你可以换成其他物体
+target_categories = ["traffic light"]                           # 我们这里要追踪人，你可以换成其他物体
 
 # 模型加载：如果你的电脑上有 GPU，可以用第一行；如果你的电脑有 Apple M 系列芯片，可以用第二行
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

@@ -1,3 +1,4 @@
+# ...existing code...
 """
 Multi-mode Vehicle Control System - Main Entry Point
 =====================================================
@@ -15,12 +16,13 @@ import os
 import cv2
 import torch
 import threading
-from threading import Lock
+from threading import Lock, Event
 import model.detector
 import utils.utils
 from traffic_light_detector import TrafficLightDetector
 from lane_follower import LaneFollower
 from person_safety_detector import PersonSafetyDetector
+import time
 
 # ============================================================================
 # Import all constants
@@ -83,12 +85,22 @@ class LaneFollowingThread:
         self.cfg = utils.utils.load_datafile(CONFIG_FILE)
     
     def run(self, cap, exit_flag):
+        retry_count = 0
+        max_retries = 100
         """Run lane following detection in thread"""
         
         while not exit_flag['flag']:
             ret, frame = cap.read()
             if not ret:
-                break
+                retry_count += 1
+                print(f"[TRAFFIC LIGHT] Failed to read frame. Retry {retry_count}/{max_retries}")
+            
+                if retry_count >= max_retries:
+                    print("[TRAFFIC LIGHT] Max retries reached - exiting thread")
+                    break
+                time.sleep(1)  # 等待1秒后重试
+                continue
+            
             
             h, w, _ = frame.shape
             lane_mask = self.follower.detect_lane(frame)
@@ -146,6 +158,44 @@ class LaneFollowingThread:
                 break
 
 
+# ---------------------------------------------------------------------------
+# Shared frame provider - read once and share to all detectors
+# ---------------------------------------------------------------------------
+class SharedFrameCapture:
+    """A lightweight proxy that provides .read() to consumers using the latest frame."""
+    def __init__(self):
+        self.lock = Lock()
+        self.event = Event()
+        self.frame = None
+        self.ret = False
+        self.stopped = False
+
+    def update_frame(self, ret, frame):
+        with self.lock:
+            self.ret = ret
+            # store a copy to avoid race conditions when OpenCV reuses buffers
+            self.frame = None if frame is None else frame.copy()
+            # notify consumers a new frame is available
+            self.event.set()
+
+    def read(self):
+        """Return the most recent frame. Wait briefly if none available yet."""
+        # wait until at least one frame is available or stop requested
+        if not self.event.wait(timeout=1.0):
+            # timeout - no frame available
+            return False, None
+        with self.lock:
+            ret = self.ret
+            frame = None if self.frame is None else self.frame.copy()
+        # clear event so next wait will block until a new frame arrives
+        self.event.clear()
+        return ret, frame
+
+    def stop(self):
+        self.stopped = True
+        self.event.set()
+
+
 def print_system_info():
     """Print system information and configuration"""
     print("=" * 80)
@@ -200,15 +250,41 @@ def main():
     print("✅ Model loaded successfully")
     
     # ========================================================================
-    # Open Video Stream
+    # Open Video Stream (single reader) and create shared frame provider
     # ========================================================================
     print("\n⏳ Opening video stream...")
-    cap = cv2.VideoCapture(STREAM_URL)
-    if not cap.isOpened():
+    real_cap = cv2.VideoCapture(STREAM_URL)
+    if not real_cap.isOpened():
         print("❌ Failed to open video stream")
         print(f"   Check if Raspberry Pi is running at: {STREAM_URL}")
         return
     print(f"✅ Video stream opened: {STREAM_URL}")
+
+    # Create shared frame capture and a reader thread that updates it
+    shared_cap = SharedFrameCapture()
+
+    def frame_reader_loop(real_cap, shared_cap, exit_flag):
+        retry_count = 0
+        while not exit_flag['flag']:
+            ret, frame = real_cap.read()
+            if not ret:
+                retry_count += 1
+                if DEBUG_MODE:
+                    print(f"[FRAME READER] Failed to read frame. Retry {retry_count}")
+                time.sleep(0.1)
+                continue
+            retry_count = 0
+            shared_cap.update_frame(ret, frame)
+        # signal consumers to stop
+        shared_cap.stop()
+
+    frame_reader = threading.Thread(
+        target=frame_reader_loop,
+        args=(real_cap, shared_cap, exit_flag),
+        daemon=True,
+        name="FrameReader"
+    )
+    frame_reader.start()
     
     # ========================================================================
     # Load Label Names
@@ -220,7 +296,7 @@ def main():
     print(f"✅ Loaded {len(LABEL_NAMES)} class labels")
     
     # ========================================================================
-    # Initialize Detection Threads
+    # Initialize Detection Threads (pass shared_cap instead of real cap)
     # ========================================================================
     print("\n⏳ Starting detection threads...")
     print("-" * 80)
@@ -231,19 +307,19 @@ def main():
     
     traffic_thread = threading.Thread(
         target=traffic_thread_obj.run, 
-        args=(cap, LABEL_NAMES, exit_flag), 
+        args=(shared_cap, LABEL_NAMES, exit_flag), 
         daemon=True,
         name="TrafficLightDetector"
     )
     safety_thread = threading.Thread(
         target=safety_thread_obj.run, 
-        args=(cap, LABEL_NAMES, exit_flag), 
+        args=(shared_cap, LABEL_NAMES, exit_flag), 
         daemon=True,
         name="PersonSafetyDetector"
     )
     lane_thread = threading.Thread(
         target=lane_thread_obj.run, 
-        args=(cap, exit_flag), 
+        args=(shared_cap, exit_flag), 
         daemon=True,
         name="LaneFollower"
     )
@@ -278,7 +354,12 @@ def main():
         # ====================================================================
         # Cleanup Resources
         # ====================================================================
-        cap.release()
+        exit_flag['flag'] = True
+        # stop frame reader and release real capture
+        shared_cap.stop()
+        if frame_reader.is_alive():
+            frame_reader.join(timeout=1.0)
+        real_cap.release()
         cv2.destroyAllWindows()
         print("\n✅ All resources released")
         print("✅ Program ended successfully")
@@ -286,3 +367,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+# ...existing code...
