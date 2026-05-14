@@ -427,11 +427,11 @@ def main():
                 start_time = time.time()
             
             # Check for 'q' key press
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                if DEBUG_MODE:
-                    print("[MAIN] 'q' key detected - initiating shutdown")
-                exit_flag['flag'] = True
-                break
+            # if cv2.waitKey(1) & 0xFF == ord('q'):
+            #     if DEBUG_MODE:
+            #         print("[MAIN] 'q' key detected - initiating shutdown")
+            #     exit_flag['flag'] = True
+            #     break
             
             time.sleep(0.033)  # ~30 FPS for display loop
     
