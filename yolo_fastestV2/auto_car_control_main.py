@@ -48,6 +48,18 @@ from constants import (
 state_lock = Lock()
 exit_flag = {'flag': False}  # Use dict to allow modification in threads
 
+# ============================================================================
+# Shared Display State - for aggregated visualization
+# ============================================================================
+display_state = {
+    'traffic_frame': None,
+    'safety_frame': None,
+    'lane_frame': None,
+    'status_text': '',
+    'fps': 0.0,
+    'lock': Lock()
+}
+
 
 class TrafficLightThread:
     """Thread for traffic light detection"""
@@ -84,7 +96,7 @@ class LaneFollowingThread:
         self.follower = LaneFollower(CONTROL_URL, state_lock)
         self.cfg = utils.utils.load_datafile(CONFIG_FILE)
     
-    def run(self, cap, exit_flag):
+    def run(self, cap, exit_flag, display_state):
         retry_count = 0
         max_retries = 100
         """Run lane following detection in thread"""
@@ -93,12 +105,13 @@ class LaneFollowingThread:
             ret, frame = cap.read()
             if not ret:
                 retry_count += 1
-                print(f"[TRAFFIC LIGHT] Failed to read frame. Retry {retry_count}/{max_retries}")
+                if DEBUG_MODE:
+                    print(f"[LANE] Failed to read frame. Retry {retry_count}/{max_retries}")
             
                 if retry_count >= max_retries:
-                    print("[TRAFFIC LIGHT] Max retries reached - exiting thread")
+                    print("[LANE] Max retries reached - exiting thread")
                     break
-                time.sleep(1)  # 等待1秒后重试
+                time.sleep(1)
                 continue
             
             
@@ -122,30 +135,39 @@ class LaneFollowingThread:
                     print(f"[LANE] {status} | Cmd: {command} | Curv: {curv:.2f}")
                 self.follower.last_lane_command = command
             
+            # ================================================================
+            # Visualization - Lane Detection Output
+            # ================================================================
+            display_frame = frame.copy()
+            cv2.putText(display_frame, f"Curvature: {curvature:.2f}", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(display_frame, f"Offset: {offset:.2f}", (10, 70), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            if self.follower.red_light_detected:
+                mode_text = "[RED LIGHT - STOP]"
+                color = (0, 0, 255)
+            elif getattr(self.follower, 'person_in_danger_zone', False):
+                mode_text = "[PERSON TOO CLOSE - EMERGENCY STOP]"
+                color = (0, 0, 255)
+            elif self.follower.person_detected:
+                mode_text = "[PERSON DETECTED]"
+                color = (0, 0, 255)
+            else:
+                mode_text = "[LANE MODE]"
+                color = (0, 255, 0)
+            
+            cv2.putText(display_frame, mode_text, (10, 110), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+            
+            # Update display state for aggregated visualization
+            with display_state['lock']:
+                display_frame_resized = cv2.resize(display_frame, (320, 240))
+                display_state['lane_frame'] = display_frame_resized
+                display_state['status_text'] = f"Lane: {status} | {mode_text}"
+            
             if SHOW_VISUAL_OUTPUT:
                 try:
-                    display_frame = frame.copy()
-                    cv2.putText(display_frame, f"Curvature: {curvature:.2f}", (10, 30), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.putText(display_frame, f"Offset: {offset:.2f}", (10, 70), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    
-                    if self.follower.red_light_detected:
-                        mode_text = "[RED LIGHT - STOP]"
-                        color = (0, 0, 255)
-                    elif getattr(self.follower, 'person_in_danger_zone', False):
-                        mode_text = "[PERSON TOO CLOSE - EMERGENCY STOP]"
-                        color = (0, 0, 255)
-                    elif self.follower.person_detected:
-                        mode_text = "[PERSON DETECTED]"
-                        color = (0, 0, 255)
-                    else:
-                        mode_text = "[LANE MODE]"
-                        color = (0, 255, 0)
-                    
-                    cv2.putText(display_frame, mode_text, (10, 110), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-                    
                     display_mask = cv2.cvtColor(lane_mask, cv2.COLOR_GRAY2BGR)
                     combined = cv2.hstack([display_frame, display_mask])
                     cv2.imshow('Lane Detection | Mask', combined)
@@ -232,6 +254,46 @@ def print_system_info():
     print(f"🖼️  Visual Output: {'ON' if SHOW_VISUAL_OUTPUT else 'OFF'}")
     print("=" * 80)
     print("Press 'q' to exit the program\n")
+
+
+def create_display_canvas(display_state):
+    """
+    Create an aggregated display canvas showing all detection results.
+    Mimics rasp_yolo.py visualization approach.
+    """
+    try:
+        with display_state['lock']:
+            lane_frame = display_state['lane_frame']
+            status_text = display_state['status_text']
+            fps = display_state['fps']
+        
+        # Create canvas with proper size for multiple streams
+        canvas_height = 480
+        canvas_width = 640
+        canvas = cv2.Mat(canvas_height, canvas_width, cv2.CV_8UC3)
+        canvas = cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR)
+        canvas[:] = (30, 30, 30)  # Dark background
+        
+        # Display lane frame if available
+        if lane_frame is not None:
+            h, w = lane_frame.shape[:2]
+            y_offset = (canvas_height - h) // 2
+            x_offset = (canvas_width - w) // 2
+            canvas[y_offset:y_offset+h, x_offset:x_offset+w] = lane_frame
+        
+        # Add status information
+        cv2.putText(canvas, status_text, (20, 40), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(canvas, f"FPS: {fps:.1f}", (20, canvas_height - 20), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(canvas, "Press 'q' to exit", (canvas_width - 280, canvas_height - 20),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        return canvas
+    except Exception as e:
+        if DEBUG_MODE:
+            print(f"[DISPLAY] Error creating canvas: {str(e)}")
+        return None
 
 
 def main():
@@ -322,7 +384,7 @@ def main():
     )
     lane_thread = threading.Thread(
         target=lane_thread_obj.run, 
-        args=(shared_cap, exit_flag), 
+        args=(shared_cap, exit_flag, display_state), 
         daemon=True,
         name="LaneFollower"
     )
@@ -341,22 +403,60 @@ def main():
     print("\n🚗 System is now running. Press 'q' to exit.\n")
     
     # ========================================================================
-    # Wait for Threads to Complete
+    # Display Loop - Aggregate and show all detection results
     # ========================================================================
+    frame_count = 0
+    start_time = time.time()
+    
     try:
-        traffic_thread.join()
-        safety_thread.join()
-        lane_thread.join()
+        while not exit_flag['flag']:
+            # Create aggregated display
+            display_canvas = create_display_canvas(display_state)
+            
+            if display_canvas is not None:
+                cv2.imshow('🚗 Multi-Mode Vehicle Control - Real-time Visualization', display_canvas)
+            
+            # Calculate and update FPS
+            frame_count += 1
+            elapsed = time.time() - start_time
+            if elapsed >= 1.0:
+                fps = frame_count / elapsed
+                with display_state['lock']:
+                    display_state['fps'] = fps
+                frame_count = 0
+                start_time = time.time()
+            
+            # Check for 'q' key press
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                if DEBUG_MODE:
+                    print("[MAIN] 'q' key detected - initiating shutdown")
+                exit_flag['flag'] = True
+                break
+            
+            time.sleep(0.033)  # ~30 FPS for display loop
+    
     except KeyboardInterrupt:
         print("\n⚠️  Program interrupted by user (Ctrl+C)")
         exit_flag['flag'] = True
     except Exception as e:
         print(f"\n❌ Error occurred: {str(e)}")
         exit_flag['flag'] = True
+    
+    # ========================================================================
+    # Wait for Threads to Complete
+    # ========================================================================
+    try:
+        traffic_thread.join(timeout=5)
+        safety_thread.join(timeout=5)
+        lane_thread.join(timeout=5)
+    except Exception as e:
+        if DEBUG_MODE:
+            print(f"[MAIN] Error joining threads: {str(e)}")
+    
+    # ========================================================================
+    # Cleanup Resources
+    # ========================================================================
     finally:
-        # ====================================================================
-        # Cleanup Resources
-        # ====================================================================
         exit_flag['flag'] = True
         # stop frame reader and release real capture
         shared_cap.stop()
