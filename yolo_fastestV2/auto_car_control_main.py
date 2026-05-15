@@ -341,29 +341,70 @@ def main():
     print("\n🚗 System is now running. Press 'q' to exit.\n")
     
     # ========================================================================
-    # Wait for Threads to Complete
+    # Main Display Loop - 完全仿照 rasp_yolo.py 的显示方式
+    # 不停地读取一帧图像，在图像上绘制检测结果，然后显示
     # ========================================================================
     try:
-        traffic_thread.join()
-        safety_thread.join()
-        lane_thread.join()
+        while not exit_flag['flag']:
+            ret, frame = shared_cap.read()                    # 不停地从输入源读取一帧图像 (rasp_yolo.py 第 56 行)
+            if not ret:                                       # 如果读取失败，继续等待
+                time.sleep(0.01)
+                continue
+            
+            # ================================================================
+            # 在 frame 上绘制检测结果
+            # 仿照 rasp_yolo.py 第 98-100 行的绘制方式
+            # ================================================================
+            mode_text = "[MULTI-MODE DETECTION]"
+            color = (0, 255, 0)
+            
+            cv2.putText(frame, mode_text, (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+            
+            processed_frame = frame
+            
+            # 显示图像 - 完全仿照 rasp_yolo.py 第 103 行
+            cv2.imshow('Processed Frame', processed_frame)      # 显示获取到的图像
+            
+            # 检测 q 键有没有按下，按下就退出程序 - 完全仿照 rasp_yolo.py 第 107 行
+            # if cv2.waitKey(1) & 0xFF == ord('q'):               # 检测 q 键有没有按下，按下就退出程序
+            #     if DEBUG_MODE:
+            #         print("[MAIN] 'q' key detected - initiating shutdown")
+            #     exit_flag['flag'] = True
+            #     break
+    
     except KeyboardInterrupt:
         print("\n⚠️  Program interrupted by user (Ctrl+C)")
         exit_flag['flag'] = True
     except Exception as e:
         print(f"\n❌ Error occurred: {str(e)}")
+        if DEBUG_MODE:
+            import traceback
+            traceback.print_exc()
         exit_flag['flag'] = True
+    
+    # ========================================================================
+    # Wait for Threads to Complete
+    # ========================================================================
+    print("\n⏳ Shutting down detection threads...")
+    try:
+        traffic_thread.join(timeout=5)
+        safety_thread.join(timeout=5)
+        lane_thread.join(timeout=5)
+    except Exception as e:
+        if DEBUG_MODE:
+            print(f"[MAIN] Error joining threads: {str(e)}")
+    
+    # ========================================================================
+    # Cleanup Resources - 完全仿照 rasp_yolo.py 第 110-111 行
+    # ========================================================================
     finally:
-        # ====================================================================
-        # Cleanup Resources
-        # ====================================================================
         exit_flag['flag'] = True
-        # stop frame reader and release real capture
         shared_cap.stop()
         if frame_reader.is_alive():
             frame_reader.join(timeout=1.0)
-        real_cap.release()
-        cv2.destroyAllWindows()
+        real_cap.release()                                      # 释放视频输入源 (rasp_yolo.py 第 110 行)
+        cv2.destroyAllWindows()                                 # 释放所有窗口 (rasp_yolo.py 第 111 行)
         print("\n✅ All resources released")
         print("✅ Program ended successfully")
 
