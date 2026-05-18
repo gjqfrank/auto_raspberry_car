@@ -1,12 +1,15 @@
 """
-Lane Detection and Following Module
-====================================
+Lane Detection and Following Module with Zebra Crossing Awareness
+===================================================================
 
 Detects lane lines using HSV color detection and determines vehicle movement commands
-based on lane curvature. All parameters are imported from constants.py.
+based on lane curvature. Integrates with zebra crossing detection to maintain
+lane following through crossings.
+
+All parameters are imported from constants.py.
 
 Author: Auto Vehicle Control System
-Date: 2026-05-13
+Date: 2026-05-18
 """
 
 import cv2
@@ -31,7 +34,7 @@ from constants import (
 
 
 class LaneFollower:
-    """Lane detection and following module"""
+    """Lane detection and following module with zebra crossing awareness"""
     
     def __init__(self, control_url, state_lock):
         self.control_url = control_url
@@ -56,8 +59,7 @@ class LaneFollower:
         # State tracking
         self.last_lane_command = None
         self.red_light_detected = False
-        self.person_detected = False
-        self.person_in_danger_zone = False
+        self.zebra_crossing_detected = False  # NEW: Zebra crossing awareness
         
         # Statistics
         self.frame_count = 0
@@ -170,33 +172,29 @@ class LaneFollower:
             print(f"[LANE] ❌ Error sending command: {str(e)}")
             return False
     
-    def should_execute(self, red_light_detected, person_detected, person_in_danger_zone=False):
+    def should_execute(self, red_light_detected, zebra_crossing_detected=False):
         """
-        Check if lane following should execute based on priority system
+        Check if lane following should execute based on priority system.
         
-        Priority: red_light > person_danger > person_detected > lane_following
+        NEW priority system (Person detection disabled):
+        Priority: red_light > zebra_crossing > lane_following
         
         Args:
             red_light_detected: Whether red light was detected
-            person_detected: Whether person was detected
-            person_in_danger_zone: Whether person is too close
+            zebra_crossing_detected: Whether zebra crossing was detected
             
         Returns:
             bool: True if lane following should be executed
         """
-        # Emergency stop has highest priority
-        if person_in_danger_zone:
-            return False
-        
-        # Traffic light has priority
+        # ⚠️  IMPORTANT: When red light is detected, STOP (don't execute lane following)
         if red_light_detected:
             return False
         
-        # Person detection has priority
-        if person_detected:
-            return False
+        # ✅ NEW: When zebra crossing is detected, CONTINUE lane following (safe passage)
+        # This ensures vehicle maintains lane discipline through the crossing
+        # (zebra_crossing_detected doesn't block lane following)
         
-        # Only execute lane following if all higher priority conditions are false
+        # Only execute lane following if no red light detected
         return True
     
     def get_state(self):
@@ -209,8 +207,7 @@ class LaneFollower:
         return {
             'last_lane_command': self.last_lane_command,
             'red_light_detected': self.red_light_detected,
-            'person_detected': self.person_detected,
-            'person_in_danger_zone': self.person_in_danger_zone,
+            'zebra_crossing_detected': self.zebra_crossing_detected,
             'frame_count': self.frame_count
         }
     
