@@ -1,15 +1,19 @@
 # ...existing code...
 """
-Multi-mode Vehicle Control System - Main Entry Point
-=====================================================
+Multi-mode Vehicle Control System - Main Entry Point (UPDATED)
+===============================================================
 
-Orchestrates multiple detection modules (Traffic Light, Person Safety, Lane Following)
-with proper priority system and thread management.
+Orchestrates multiple detection modules:
+- Traffic Light Detection (COLOR-BASED)
+- Zebra Crossing Detection (NEW)
+- Lane Following (with zebra crossing awareness)
 
-Imports all parameters from constants.py - modify there to adjust behavior.
+⚠️  DISABLED: Person Safety Detection
+
+All parameters are imported from constants.py.
 
 Author: Auto Vehicle Control System
-Date: 2026-05-13
+Date: 2026-05-18
 """
 
 import os
@@ -20,8 +24,8 @@ from threading import Lock, Event
 import model.detector
 import utils.utils
 from traffic_light_detector import TrafficLightDetector
+from zebra_crossing_detector import ZebraCrossingDetector
 from lane_follower import LaneFollower
-from person_safety_detector import PersonSafetyDetector
 import time
 
 # ============================================================================
@@ -38,8 +42,10 @@ from constants import (
     DEBUG_MODE,
     LOG_INTERVAL,
     SHOW_VISUAL_OUTPUT,
-    DANGER_DISTANCE_THRESHOLD,
-    SAFE_DISTANCE_THRESHOLD,
+    ENABLE_PERSON_DETECTION,
+    ENABLE_ZEBRA_CROSSING_DETECTION,
+    ENABLE_TRAFFIC_LIGHT_DETECTION,
+    ENABLE_LANE_FOLLOWING,
 )
 
 # ============================================================================
@@ -61,19 +67,16 @@ class TrafficLightThread:
         self.detector.run(cap, LABEL_NAMES, exit_flag)
 
 
-class PersonSafetyThread:
-    """Thread for person safety distance monitoring"""
+class ZebraCrossingThread:
+    """Thread for zebra crossing detection (NEW)"""
     
-    def __init__(self, state_lock, cfg, detector_model, device):
+    def __init__(self, state_lock):
         self.state_lock = state_lock
-        self.cfg = cfg
-        self.detector_model = detector_model
-        self.device = device
-        self.detector = PersonSafetyDetector(CONTROL_URL, state_lock)
+        self.detector = ZebraCrossingDetector(CONTROL_URL, state_lock)
     
-    def run(self, cap, LABEL_NAMES, exit_flag):
-        """Run person safety detection in thread"""
-        self.detector.run(cap, self.cfg, self.detector_model, self.device, LABEL_NAMES, exit_flag)
+    def run(self, cap, exit_flag):
+        """Run zebra crossing detection in thread"""
+        self.detector.run(cap, exit_flag)
 
 
 class LaneFollowingThread:
@@ -93,12 +96,13 @@ class LaneFollowingThread:
             ret, frame = cap.read()
             if not ret:
                 retry_count += 1
-                print(f"[TRAFFIC LIGHT] Failed to read frame. Retry {retry_count}/{max_retries}")
+                if DEBUG_MODE:
+                    print(f"[LANE] Failed to read frame. Retry {retry_count}/{max_retries}")
             
                 if retry_count >= max_retries:
-                    print("[TRAFFIC LIGHT] Max retries reached - exiting thread")
+                    print("[LANE] Max retries reached - exiting thread")
                     break
-                time.sleep(1)  # 等待1秒后重试
+                time.sleep(1)
                 continue
             
             
@@ -109,17 +113,18 @@ class LaneFollowingThread:
             
             with self.state_lock:
                 self.follower.red_light_detected = getattr(self, 'red_light_detected', False)
-                self.follower.person_detected = getattr(self, 'person_detected', False)
-                # Get person safety status from shared state
-                self.follower.person_in_danger_zone = getattr(self, 'person_in_danger_zone', False)
+                self.follower.zebra_crossing_detected = getattr(self, 'zebra_crossing_detected', False)
             
-            # Check priority: red light > person safety > person detection > lane following
+            # Check priority: red_light > zebra_crossing > lane_following
+            # When zebra crossing detected, lane follower continues (safe passage)
             if self.follower.should_execute(self.follower.red_light_detected, 
-                                           self.follower.person_detected,
-                                           getattr(self.follower, 'person_in_danger_zone', False)):
+                                           self.follower.zebra_crossing_detected):
                 self.follower.send_command(command)
                 if DEBUG_MODE:
-                    print(f"[LANE] {status} | Cmd: {command} | Curv: {curv:.2f}")
+                    mode_info = ""
+                    if self.follower.zebra_crossing_detected:
+                        mode_info = " [ZEBRA CROSSING]"
+                    print(f"[LANE]{mode_info} {status} | Cmd: {command} | Curv: {curv:.2f}")
                 self.follower.last_lane_command = command
             
             if SHOW_VISUAL_OUTPUT:
@@ -133,12 +138,9 @@ class LaneFollowingThread:
                     if self.follower.red_light_detected:
                         mode_text = "[RED LIGHT - STOP]"
                         color = (0, 0, 255)
-                    elif getattr(self.follower, 'person_in_danger_zone', False):
-                        mode_text = "[PERSON TOO CLOSE - EMERGENCY STOP]"
-                        color = (0, 0, 255)
-                    elif self.follower.person_detected:
-                        mode_text = "[PERSON DETECTED]"
-                        color = (0, 0, 255)
+                    elif self.follower.zebra_crossing_detected:
+                        mode_text = "[ZEBRA CROSSING - CONTINUE]"
+                        color = (255, 0, 0)
                     else:
                         mode_text = "[LANE MODE]"
                         color = (0, 255, 0)
@@ -152,13 +154,6 @@ class LaneFollowingThread:
                 except Exception as e:
                     if DEBUG_MODE:
                         print(f"[LANE] Warning: Cannot display window - {str(e)}")
-            
-            # Check for 'q' key press to exit
-            # if cv2.waitKey(1) & 0xFF == ord('q'):
-            #     if DEBUG_MODE:
-            #         print("[LANE] 'q' key detected - initiating shutdown")
-            #     exit_flag['flag'] = True
-                # break
 
 
 # ---------------------------------------------------------------------------
@@ -201,9 +196,9 @@ class SharedFrameCapture:
 
 def print_system_info():
     """Print system information and configuration"""
-    print("=" * 80)
-    print("🚗 Multi-Mode Vehicle Control System with Safety Detection")
-    print("=" * 80)
+    print("=" * 90)
+    print("🚗 Multi-Mode Vehicle Control System (UPDATED)")
+    print("=" * 90)
     print(f"\n📡 Network Configuration:")
     print(f"   Stream URL: {STREAM_URL}")
     print(f"   Control URL: {CONTROL_URL}")
@@ -214,26 +209,22 @@ def print_system_info():
     print(f"\n⚙️  Inference Parameters:")
     print(f"   Confidence Threshold: {NMS_CONF_THRESHOLD}")
     print(f"   IoU Threshold: {NMS_IOU_THRESHOLD}")
-    print(f"\n🛡️  Safety Thresholds:")
-    print(f"   Person Danger Zone: {DANGER_DISTANCE_THRESHOLD*100:.0f}% of frame")
-    print(f"   Person Safe Distance: {SAFE_DISTANCE_THRESHOLD*100:.0f}% of frame")
-    print(f"\n🚦 Traffic Light Detection:")
-    print(f"   Mode: COLOR-BASED (No YOLO model required)")
-    print(f"   See constants.py for red/green color thresholds")
-    print(f"\n🎮 Control Modes (Priority Order):")
-    print(f"   ┌─ Level 1 (Highest): Person Safety Distance Monitoring")
-    print(f"   │   └─ If person in danger zone (>{DANGER_DISTANCE_THRESHOLD*100:.0f}%): EMERGENCY STOP")
-    print(f"   ├─ Level 2 (High): Traffic Light Detection (Color-Based)")
+    print(f"\n🎮 Active Detection Modules:")
+    print(f"   ✅ Traffic Light Detection (COLOR-BASED)" if ENABLE_TRAFFIC_LIGHT_DETECTION else "   ❌ Traffic Light Detection")
+    print(f"   ✅ Zebra Crossing Detection (NEW)" if ENABLE_ZEBRA_CROSSING_DETECTION else "   ❌ Zebra Crossing Detection")
+    print(f"   ✅ Lane Following" if ENABLE_LANE_FOLLOWING else "   ❌ Lane Following")
+    print(f"   ❌ Person Detection (DISABLED)" if not ENABLE_PERSON_DETECTION else "   ✅ Person Detection")
+    print(f"\n🎯 Updated Priority System (Person Detection Disabled):")
+    print(f"   ┌─ Level 1 (Highest): 🛣️  Zebra Crossing Detection")
+    print(f"   │   └─ When zebra crossing detected: CONTINUE lane following (safe passage)")
+    print(f"   ├─ Level 2 (High): 🚦 Traffic Light Detection (Color-Based)")
     print(f"   │   ├─ RED detected: Stop vehicle")
     print(f"   │   └─ GREEN detected: Continue driving")
-    print(f"   ├─ Level 3 (Medium): Person Detection")
-    print(f"   │   ├─ Person detected: Stop vehicle")
-    print(f"   │   └─ No person: Lane following mode")
-    print(f"   └─ Level 4 (Lowest): Lane Following Mode")
+    print(f"   └─ Level 3 (Lowest): 🛣️  Lane Following Mode")
     print(f"\n📋 All parameters can be modified in: constants.py")
     print(f"🔧 Debug Mode: {'ON' if DEBUG_MODE else 'OFF'}")
     print(f"🖼️  Visual Output: {'ON' if SHOW_VISUAL_OUTPUT else 'OFF'}")
-    print("=" * 80)
+    print("=" * 90)
     print("Press 'q' to exit the program\n")
 
 
@@ -243,9 +234,18 @@ def main():
     print_system_info()
     
     # ========================================================================
-    # Load YOLO Model (for Person Safety and Lane Detection only)
+    # Check Feature Switches
     # ========================================================================
-    print("⏳ Loading YOLO model (for Person Safety and General Detection)...")
+    if not ENABLE_PERSON_DETECTION:
+        print("ℹ️  Person detection is DISABLED in constants.py")
+    
+    if not ENABLE_ZEBRA_CROSSING_DETECTION:
+        print("⚠️  Zebra crossing detection is DISABLED in constants.py")
+    
+    # ========================================================================
+    # Load YOLO Model (still used for general object detection if needed)
+    # ========================================================================
+    print("⏳ Loading model...")
     cfg = utils.utils.load_datafile(CONFIG_FILE)
     assert os.path.exists(WEIGHTS_PATH), f"❌ Model weights not found: {WEIGHTS_PATH}"
     
@@ -255,8 +255,11 @@ def main():
     detector_model.eval()
     print("✅ Model loaded successfully")
     
-    print("\n⚠️  NOTE: Traffic Light Detection uses COLOR-BASED analysis (no YOLO model)")
-    print("           Adjust red/green thresholds in constants.py as needed")
+    print("\n📌 Detection Methods:")
+    print("   🚦 Traffic Light: COLOR-BASED (no YOLO)")
+    print("   🛣️  Zebra Crossing: COLOR-BASED (no YOLO)")
+    print("   🛣️  Lane Following: COLOR-BASED (no YOLO)")
+    print("   ❌ Person Detection: DISABLED")
     
     # ========================================================================
     # Open Video Stream (single reader) and create shared frame provider
@@ -305,62 +308,77 @@ def main():
     print(f"✅ Loaded {len(LABEL_NAMES)} class labels")
     
     # ========================================================================
-    # Initialize Detection Threads (pass shared_cap instead of real cap)
+    # Initialize Detection Threads
     # ========================================================================
     print("\n⏳ Starting detection threads...")
-    print("-" * 80)
+    print("-" * 90)
     
-    traffic_thread_obj = TrafficLightThread(state_lock)
-    safety_thread_obj = PersonSafetyThread(state_lock, cfg, detector_model, device)
-    lane_thread_obj = LaneFollowingThread(state_lock)
+    threads = []
     
-    traffic_thread = threading.Thread(
-        target=traffic_thread_obj.run, 
-        args=(shared_cap, LABEL_NAMES, exit_flag), 
-        daemon=True,
-        name="TrafficLightDetector"
-    )
-    safety_thread = threading.Thread(
-        target=safety_thread_obj.run, 
-        args=(shared_cap, LABEL_NAMES, exit_flag), 
-        daemon=True,
-        name="PersonSafetyDetector"
-    )
-    lane_thread = threading.Thread(
-        target=lane_thread_obj.run, 
-        args=(shared_cap, exit_flag), 
-        daemon=True,
-        name="LaneFollower"
-    )
+    # Traffic Light Detection Thread
+    if ENABLE_TRAFFIC_LIGHT_DETECTION:
+        traffic_thread_obj = TrafficLightThread(state_lock)
+        traffic_thread = threading.Thread(
+            target=traffic_thread_obj.run, 
+            args=(shared_cap, LABEL_NAMES, exit_flag), 
+            daemon=True,
+            name="TrafficLightDetector"
+        )
+        traffic_thread.start()
+        threads.append(traffic_thread)
+        print(f"✅ Traffic Light Detection Thread: STARTED (COLOR-BASED)")
+    else:
+        print(f"⏭️  Traffic Light Detection Thread: SKIPPED (disabled)")
     
-    # ========================================================================
-    # Start All Threads
-    # ========================================================================
-    traffic_thread.start()
-    safety_thread.start()
-    lane_thread.start()
+    # Zebra Crossing Detection Thread (NEW)
+    if ENABLE_ZEBRA_CROSSING_DETECTION:
+        zebra_thread_obj = ZebraCrossingThread(state_lock)
+        zebra_thread = threading.Thread(
+            target=zebra_thread_obj.run, 
+            args=(shared_cap, exit_flag), 
+            daemon=True,
+            name="ZebraCrossingDetector"
+        )
+        zebra_thread.start()
+        threads.append(zebra_thread)
+        print(f"✅ Zebra Crossing Detection Thread: STARTED (NEW)")
+    else:
+        print(f"⏭️  Zebra Crossing Detection Thread: SKIPPED (disabled)")
     
-    print(f"✅ Traffic Light Detection Thread: STARTED (COLOR-BASED)")
-    print(f"✅ Person Safety Detection Thread: STARTED")
-    print(f"✅ Lane Following Thread: STARTED")
-    print("-" * 80)
+    # Lane Following Thread
+    if ENABLE_LANE_FOLLOWING:
+        lane_thread_obj = LaneFollowingThread(state_lock)
+        lane_thread = threading.Thread(
+            target=lane_thread_obj.run, 
+            args=(shared_cap, exit_flag), 
+            daemon=True,
+            name="LaneFollower"
+        )
+        lane_thread.start()
+        threads.append(lane_thread)
+        print(f"✅ Lane Following Thread: STARTED")
+    else:
+        print(f"⏭️  Lane Following Thread: SKIPPED (disabled)")
+    
+    # Person Detection Thread (DISABLED by default)
+    if ENABLE_PERSON_DETECTION:
+        print(f"⚠️  Person Safety Detection: NOT IMPLEMENTED (disabled)")
+    else:
+        print(f"❌ Person Safety Detection: DISABLED")
+    
+    print("-" * 90)
     print("\n🚗 System is now running. Press 'q' to exit.\n")
     
     # ========================================================================
-    # Main Display Loop - 完全仿照 rasp_yolo.py 的显示方式
-    # 不停地读取一帧图像，在图像上绘制检测结果，然后显示
+    # Main Display Loop
     # ========================================================================
     try:
         while not exit_flag['flag']:
-            ret, frame = shared_cap.read()                    # 不停地从输入源读取一帧图像 (rasp_yolo.py 第 56 行)
-            if not ret:                                       # 如果读取失败，继续等待
+            ret, frame = shared_cap.read()
+            if not ret:
                 time.sleep(0.01)
                 continue
             
-            # ================================================================
-            # 在 frame 上绘制检测结果
-            # 仿照 rasp_yolo.py 第 98-100 行的绘制方式
-            # ================================================================
             mode_text = "[MULTI-MODE DETECTION]"
             color = (0, 255, 0)
             
@@ -369,15 +387,7 @@ def main():
             
             processed_frame = frame
             
-            # 显示图像 - 完全仿照 rasp_yolo.py 第 103 行
-            cv2.imshow('Processed Frame', processed_frame)      # 显示获取到的图像
-            
-            # 检测 q 键有没有按下，按下就退出程序 - 完全仿照 rasp_yolo.py 第 107 行
-            # if cv2.waitKey(1) & 0xFF == ord('q'):               # 检测 q 键有没有按下，按下就退出程序
-            #     if DEBUG_MODE:
-            #         print("[MAIN] 'q' key detected - initiating shutdown")
-            #     exit_flag['flag'] = True
-            #     break
+            cv2.imshow('Processed Frame', processed_frame)
     
     except KeyboardInterrupt:
         print("\n⚠️  Program interrupted by user (Ctrl+C)")
@@ -394,23 +404,22 @@ def main():
     # ========================================================================
     print("\n⏳ Shutting down detection threads...")
     try:
-        traffic_thread.join(timeout=5)
-        safety_thread.join(timeout=5)
-        lane_thread.join(timeout=5)
+        for thread in threads:
+            thread.join(timeout=5)
     except Exception as e:
         if DEBUG_MODE:
             print(f"[MAIN] Error joining threads: {str(e)}")
     
     # ========================================================================
-    # Cleanup Resources - 完全仿照 rasp_yolo.py 第 110-111 行
+    # Cleanup Resources
     # ========================================================================
     finally:
         exit_flag['flag'] = True
         shared_cap.stop()
         if frame_reader.is_alive():
             frame_reader.join(timeout=1.0)
-        real_cap.release()                                      # 释放视频输入源 (rasp_yolo.py 第 110 行)
-        cv2.destroyAllWindows()                                 # 释放所有窗口 (rasp_yolo.py 第 111 行)
+        real_cap.release()
+        cv2.destroyAllWindows()
         print("\n✅ All resources released")
         print("✅ Program ended successfully")
 
