@@ -57,6 +57,24 @@ PERSON_SAFETY_MIN_COMMAND_INTERVAL = 0.05                   # 最小命令间隔
 PERSON_SAFETY_DISTANCE_HISTORY_SIZE = 5                     # 距离历史缓冲大小
 
 # ============================================================================
+# 斑马线检测参数 (Zebra Crossing Detection Parameters)
+# ============================================================================
+# 斑马线条纹颜色范围 (HSV) - 白色条纹
+ZEBRA_LOWER_WHITE = np.array([0, 0, 150])
+ZEBRA_UPPER_WHITE = np.array([180, 30, 255])
+
+# 斑马线检测阈值
+ZEBRA_CROSSING_HORIZONTAL_RATIO_THRESHOLD = 0.05           # 水平条纹比例阈值 (5%)
+ZEBRA_CROSSING_PATTERN_THRESHOLD = 20                       # 最小条纹数量
+ZEBRA_CROSSING_CONFIDENCE_THRESHOLD = 0.6                   # 斑马线确信度阈值
+ZEBRA_CROSSING_ROI_START_RATIO = 0.3                        # ROI 起始位置 (从顶部的百分比)
+ZEBRA_CROSSING_ROI_END_RATIO = 0.9                          # ROI 结束位置 (从顶部的百分比)
+
+# 斑马线检测状态平滑参数
+ZEBRA_CROSSING_STATE_HISTORY_SIZE = 5                       # 历史缓冲大小 (帧数)
+ZEBRA_CROSSING_STATE_CONFIDENCE_THRESHOLD = 0.6             # 状态确信度阈值 (0.0-1.0)
+
+# ============================================================================
 # 红绿灯检测参数 (Traffic Light Detection Parameters) - COLOR-BASED (No YOLO)
 # ============================================================================
 # 🚦 红色范围 (HSV) - 红色在 HSV 中分为两个范围 (由于HSV色轮特性)
@@ -74,8 +92,6 @@ TRAFFIC_LIGHT_LOWER_YELLOW = np.array([15, 100, 100])
 TRAFFIC_LIGHT_UPPER_YELLOW = np.array([35, 255, 255])
 
 # 📊 颜色检测阈值 - 像素占比阈值 (画面中至少需要多少比例的该颜色像素)
-# 🔴 降低这个值 → 检测红灯需要的红色像素更少 (更灵敏)
-# 🔴 增加这个值 → 检测红灯需要的红色像素更多 (更严格)
 TRAFFIC_LIGHT_RED_RATIO_THRESHOLD = 0.05                    # 红色像素占比阈值 (5% 试用值)
 TRAFFIC_LIGHT_GREEN_RATIO_THRESHOLD = 0.05                  # 绿色像素占比阈值 (5% 试用值)
 TRAFFIC_LIGHT_YELLOW_RATIO_THRESHOLD = 0.03                 # 黄色像素占比阈值 (3% 试用值)
@@ -99,6 +115,14 @@ COMMAND_STOP = "STOP"                                       # 停止
 COMMAND_CONTINUE = "CONTINUE"                               # 继续
 
 # ============================================================================
+# 功能开关 (Feature Switches)
+# ============================================================================
+ENABLE_PERSON_DETECTION = False                             # ❌ 禁用行人检测功能
+ENABLE_ZEBRA_CROSSING_DETECTION = True                      # ✅ 启用斑马线检测
+ENABLE_TRAFFIC_LIGHT_DETECTION = True                       # ✅ 启用红绿灯检测
+ENABLE_LANE_FOLLOWING = True                                # ✅ 启用车道跟踪
+
+# ============================================================================
 # 调试和日志参数 (Debug and Logging Parameters)
 # ============================================================================
 DEBUG_MODE = True                                           # 调试模式开关
@@ -119,20 +143,20 @@ SHOW_VISUAL_OUTPUT = True                                   # 显示视觉输出
 # 优先级定义 (Priority Levels)
 # ============================================================================
 """
-优先级系统 (Priority System):
+优先级系统 (Priority System) - 已更新:
 
-Priority 1 (Highest): 🛡️  Person Safety Distance Detection
-  - 行人距离太近时紧急停止
+Priority 1 (Highest): 🚦 Traffic Light Detection (COLOR-BASED)
+  - 红灯时停止
+  - 绿灯时继续
   
-Priority 2 (High): 🚦 Traffic Light Detection (COLOR-BASED)
-  - 使用颜色分析检测红绿灯，不需要YOLO模型
-  - 通过调整常数中的阈值参数灵活调整检测灵敏度
+Priority 2 (High): 🛣️  Zebra Crossing Detection
+  - 检测到斑马线时继续跟着当前车道行驶
+  - 不停止，安全通过斑马线
   
-Priority 3 (Medium): 👤 Person Detection
-  - 检测到行人时停止
-  
-Priority 4 (Lowest): 🛣️  Lane Following
+Priority 3 (Lowest): 🛣️  Lane Following
   - 默认的车道跟踪模式
+
+❌ DISABLED: 行人检测功能已禁用
 """
 
 # ============================================================================
@@ -149,36 +173,4 @@ USE_GPU = False                                             # 是否使用 GPU
 GPU_ID = 0                                                  # GPU 设备ID
 NUM_WORKERS = 4                                             # 数据加载工作线程数
 
-# ============================================================================
-# 调试提示 (Debug Tips)
-# ============================================================================
-"""
-🎚️  红绿灯检测调试指南:
-
-1. 调整红色阈值 - 修改 TRAFFIC_LIGHT_RED_RATIO_THRESHOLD
-   - 如果检测不到红灯，减小这个值 (如: 0.03)
-   - 如果误检到红灯，增加这个值 (如: 0.08)
-
-2. 调整绿色阈值 - 修改 TRAFFIC_LIGHT_GREEN_RATIO_THRESHOLD
-   - 如果检测不到绿灯，减小这个值 (如: 0.03)
-   - 如果误检到绿灯，增加这个值 (如: 0.08)
-
-3. 调整颜色范围 - 修改 HSV 范围
-   - 使用 HSV 取色工具找到准确的颜色范围
-   - 例如: https://tool.c7sky.com/webcolor/
-
-4. 启用 ROI 模式 - 只在画面特定区域检测
-   - TRAFFIC_LIGHT_ROI_ENABLED = True
-   - 通常红绿灯在画面上方，设置 ROI_START=0.0, ROI_END=0.4
-
-5. 查看实时检测数据
-   - DEBUG_MODE = True
-   - 每 30 帧打印一次 Red/Green/Yellow 的像素比例
-   - 参考这些数据调整阈值
-
-6. 查看颜色掩码可视化
-   - SHOW_VISUAL_OUTPUT = True
-   - 显示红/绿/黄颜色掩码，帮助理解检测效果
-"""
-
-print("[CONFIG] Constants loaded successfully - Traffic Light using COLOR-BASED detection")
+print("[CONFIG] Constants loaded successfully - Zebra Crossing & Lane Following enabled, Person Detection disabled")
