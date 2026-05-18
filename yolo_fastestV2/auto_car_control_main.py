@@ -50,7 +50,7 @@ exit_flag = {'flag': False}  # Use dict to allow modification in threads
 
 
 class TrafficLightThread:
-    """Thread for traffic light detection"""
+    """Thread for traffic light detection (COLOR-BASED, no YOLO model needed)"""
     
     def __init__(self, state_lock):
         self.state_lock = state_lock
@@ -217,12 +217,15 @@ def print_system_info():
     print(f"\n🛡️  Safety Thresholds:")
     print(f"   Person Danger Zone: {DANGER_DISTANCE_THRESHOLD*100:.0f}% of frame")
     print(f"   Person Safe Distance: {SAFE_DISTANCE_THRESHOLD*100:.0f}% of frame")
+    print(f"\n🚦 Traffic Light Detection:")
+    print(f"   Mode: COLOR-BASED (No YOLO model required)")
+    print(f"   See constants.py for red/green color thresholds")
     print(f"\n🎮 Control Modes (Priority Order):")
     print(f"   ┌─ Level 1 (Highest): Person Safety Distance Monitoring")
     print(f"   │   └─ If person in danger zone (>{DANGER_DISTANCE_THRESHOLD*100:.0f}%): EMERGENCY STOP")
-    print(f"   ├─ Level 2 (High): Traffic Light Detection")
-    print(f"   │   ├─ RED LIGHT: Stop vehicle")
-    print(f"   │   └─ GREEN LIGHT: Continue driving")
+    print(f"   ├─ Level 2 (High): Traffic Light Detection (Color-Based)")
+    print(f"   │   ├─ RED detected: Stop vehicle")
+    print(f"   │   └─ GREEN detected: Continue driving")
     print(f"   ├─ Level 3 (Medium): Person Detection")
     print(f"   │   ├─ Person detected: Stop vehicle")
     print(f"   │   └─ No person: Lane following mode")
@@ -240,9 +243,9 @@ def main():
     print_system_info()
     
     # ========================================================================
-    # Load YOLO Model
+    # Load YOLO Model (for Person Safety and Lane Detection only)
     # ========================================================================
-    print("⏳ Loading YOLO model...")
+    print("⏳ Loading YOLO model (for Person Safety and General Detection)...")
     cfg = utils.utils.load_datafile(CONFIG_FILE)
     assert os.path.exists(WEIGHTS_PATH), f"❌ Model weights not found: {WEIGHTS_PATH}"
     
@@ -251,6 +254,9 @@ def main():
     detector_model.load_state_dict(torch.load(WEIGHTS_PATH, map_location=device))
     detector_model.eval()
     print("✅ Model loaded successfully")
+    
+    print("\n⚠️  NOTE: Traffic Light Detection uses COLOR-BASED analysis (no YOLO model)")
+    print("           Adjust red/green thresholds in constants.py as needed")
     
     # ========================================================================
     # Open Video Stream (single reader) and create shared frame provider
@@ -334,7 +340,7 @@ def main():
     safety_thread.start()
     lane_thread.start()
     
-    print(f"✅ Traffic Light Detection Thread: STARTED")
+    print(f"✅ Traffic Light Detection Thread: STARTED (COLOR-BASED)")
     print(f"✅ Person Safety Detection Thread: STARTED")
     print(f"✅ Lane Following Thread: STARTED")
     print("-" * 80)
