@@ -4,6 +4,7 @@ Zebra Crossing Detection Module
 
 Detects zebra crossing patterns using HSV color detection and stripe analysis.
 When zebra crossing is detected, lane follower continues lane following for safe passage.
+Only analyzes the bottom 1/3 of the frame.
 
 All parameters are imported from constants.py.
 
@@ -48,15 +49,19 @@ class ZebraCrossingDetector:
         self.pattern_threshold = ZEBRA_CROSSING_PATTERN_THRESHOLD
         self.confidence_threshold = ZEBRA_CROSSING_CONFIDENCE_THRESHOLD
         
-        # ROI settings
-        self.roi_start_ratio = ZEBRA_CROSSING_ROI_START_RATIO
-        self.roi_end_ratio = ZEBRA_CROSSING_ROI_END_RATIO
+        # ROI settings - 只在最下面的1/3部分检测
+        self.roi_start_ratio = ZEBRA_CROSSING_ROI_START_RATIO  # 从2/3处开始
+        self.roi_end_ratio = ZEBRA_CROSSING_ROI_END_RATIO      # 到底部
         
         # State tracking
         self.zebra_crossing_detected = False
         self.crossing_state = None
         self.state_history = deque(maxlen=ZEBRA_CROSSING_STATE_HISTORY_SIZE)
         self.state_confidence_threshold = ZEBRA_CROSSING_STATE_CONFIDENCE_THRESHOLD
+        
+        # Visualization info
+        self.zebra_mask = None  # 用于可视化的斑马线掩码
+        self.zebra_roi_start_y = 0
         
         # Statistics
         self.frame_count = 0
@@ -65,30 +70,38 @@ class ZebraCrossingDetector:
     def detect_zebra_crossing(self, frame):
         """
         Detect zebra crossing patterns in frame using HSV color thresholding
+        Only analyzes the bottom 1/3 of the frame
         
         Args:
             frame: Input frame from video capture
             
         Returns:
-            tuple: (detected, confidence, mask) - whether zebra crossing detected, confidence level, binary mask
+            tuple: (mask_full, mask_roi, roi_y_start) - full frame mask, ROI mask, start y
         """
         h, w = frame.shape[:2]
         
-        # Apply ROI (Region of Interest)
+        # Apply ROI (Region of Interest) - 只在最下面的1/3部分
         roi_start = int(h * self.roi_start_ratio)
         roi_end = int(h * self.roi_end_ratio)
         frame_roi = frame[roi_start:roi_end, :]
         
         # Convert to HSV and detect white stripes
         hsv = cv2.cvtColor(frame_roi, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, self.lower_white, self.upper_white)
+        mask_roi = cv2.inRange(hsv, self.lower_white, self.upper_white)
         
         # Morphological operations to enhance stripe pattern
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask_roi = cv2.morphologyEx(mask_roi, cv2.MORPH_CLOSE, kernel)
+        mask_roi = cv2.morphologyEx(mask_roi, cv2.MORPH_OPEN, kernel)
         
-        return mask, frame_roi
+        # 创建完整高度的掩码用于可视化
+        mask_full = np.zeros((h, w), dtype=np.uint8)
+        mask_full[roi_start:roi_end, :] = mask_roi
+        
+        self.zebra_mask = mask_roi
+        self.zebra_roi_start_y = roi_start
+        
+        return mask_full, mask_roi
     
     def analyze_stripe_pattern(self, mask):
         """
@@ -100,6 +113,9 @@ class ZebraCrossingDetector:
         Returns:
             tuple: (pattern_detected, stripe_count, confidence)
         """
+        if mask.size == 0:
+            return False, 0, 0.0
+        
         h, w = mask.shape
         
         # Count horizontal white pixels per row
@@ -192,9 +208,9 @@ class ZebraCrossingDetector:
             retry_count = 0
             self.frame_count += 1
             
-            # Detect zebra crossing
-            mask, frame_roi = self.detect_zebra_crossing(frame)
-            pattern_detected, stripe_count, raw_confidence = self.analyze_stripe_pattern(mask)
+            # Detect zebra crossing (only bottom 1/3)
+            mask_full, mask_roi = self.detect_zebra_crossing(frame)
+            pattern_detected, stripe_count, raw_confidence = self.analyze_stripe_pattern(mask_roi)
             
             # Apply state smoothing
             smoothed_detection, smoothed_confidence = self.smooth_state(pattern_detected)
@@ -211,5 +227,3 @@ class ZebraCrossingDetector:
             if DEBUG_MODE and self.frame_count % LOG_INTERVAL == 0:
                 status = "🟩 ZEBRA CROSSING DETECTED" if smoothed_detection else "⬜ No crossing"
                 print(f"[ZEBRA] {status} | Stripes: {stripe_count} | Confidence: {smoothed_confidence:.2f}")
-
-

@@ -53,13 +53,20 @@ class LaneFollower:
         # Morphological operations kernel
         self.kernel = cv2.getStructuringElement(cv2.MORPH_RECT, LANE_KERNEL_SIZE)
         
-        # ROI settings
-        self.roi_start_ratio = LANE_ROI_START_RATIO
+        # ROI settings - 只在最下面的1/3部分检测
+        self.roi_start_ratio = LANE_ROI_START_RATIO  # 从2/3处开始
         
         # State tracking
         self.last_lane_command = None
         self.red_light_detected = False
         self.zebra_crossing_detected = False  # NEW: Zebra crossing awareness
+        
+        # Lane tracking info for visualization
+        self.left_lane_x = []
+        self.right_lane_x = []
+        self.lane_curvature = 0
+        self.lane_offset = 0
+        self.lane_radius = 0  # 曲率半径
         
         # Statistics
         self.frame_count = 0
@@ -67,53 +74,72 @@ class LaneFollower:
     def detect_lane(self, frame):
         """
         Detect lane lines in frame using HSV color thresholding
+        Only analyzes the bottom 1/3 of the frame
         
         Args:
             frame: Input frame from video capture
             
         Returns:
-            np.ndarray: Binary mask of detected lane lines
+            tuple: (mask, roi_mask, roi_y_start) - binary mask, ROI-only mask, ROI start y
         """
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, self.lower_white, self.upper_white)
+        h, w = frame.shape[:2]
+        
+        # Apply ROI - 只在最下面的1/3部分
+        roi_start_y = int(h * self.roi_start_ratio)
+        frame_roi = frame[roi_start_y:, :]
+        
+        hsv = cv2.cvtColor(frame_roi, cv2.COLOR_BGR2HSV)
+        mask_roi = cv2.inRange(hsv, self.lower_white, self.upper_white)
         
         # Morphological operations to clean up mask
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel)
+        mask_roi = cv2.morphologyEx(mask_roi, cv2.MORPH_CLOSE, self.kernel)
+        mask_roi = cv2.morphologyEx(mask_roi, cv2.MORPH_OPEN, self.kernel)
         
-        return mask
+        # 创建完整高度的掩码用于可视化
+        mask_full = np.zeros((h, w), dtype=np.uint8)
+        mask_full[roi_start_y:, :] = mask_roi
+        
+        return mask_full, mask_roi, roi_start_y
     
-    def find_lane_curvature(self, mask, frame):
+    def find_lane_curvature(self, mask_roi, frame, roi_y_start):
         """
-        Calculate lane curvature and offset from center
+        Calculate lane curvature, offset and radius
         
         Args:
-            mask: Binary mask of lane
+            mask_roi: Binary mask of lane (ROI region only)
             frame: Original frame (for dimension reference)
+            roi_y_start: Starting Y coordinate of ROI
             
         Returns:
-            tuple: (curvature, offset) - normalized values for control
+            tuple: (curvature, offset, radius, left_x, right_x) - normalized values
         """
-        h, w = mask.shape
+        h_roi, w = mask_roi.shape
+        h_full = frame.shape[0]
         
-        # Focus on bottom half of image (where car sees road ahead)
-        mask_roi = mask[int(h * self.roi_start_ratio):, :]
         cols = cv2.findNonZero(mask_roi)
         
         if cols is None or len(cols) < 10:
-            return 0, 0
+            return 0, 0, 0, [], []
         
         # Extract x coordinates of detected pixels
         x_coords = cols[:, 0, 0]
+        y_coords = cols[:, 0, 1]
         mid_w = w // 2
         
         # Split into left and right lane markers
         left_points = x_coords[x_coords < mid_w]
         right_points = x_coords[x_coords >= mid_w]
         
+        left_y = y_coords[x_coords < mid_w]
+        right_y = y_coords[x_coords >= mid_w]
+        
         # Calculate lane centers
         left_center = np.mean(left_points) if len(left_points) > 0 else mid_w * 0.25
         right_center = np.mean(right_points) if len(right_points) > 0 else mid_w * 1.75
+        
+        # 保存检测到的车道点用于可视化
+        self.left_lane_x = sorted(set(left_points.astype(int).tolist())) if len(left_points) > 0 else []
+        self.right_lane_x = sorted(set(right_points.astype(int).tolist())) if len(right_points) > 0 else []
         
         # Calculate offset from image center
         lane_center = (left_center + right_center) / 2
@@ -124,7 +150,35 @@ class LaneFollower:
         lane_width = right_center - left_center
         curvature = offset * (w / (lane_width + 1e-5))
         
-        return curvature, offset
+        # 计算曲率半径 (Radius of Curvature)
+        # 使用简单的曲率公式: R = (1 + (dy/dx)^2)^1.5 / |d2y/dx2|
+        if len(left_points) > 2 and len(right_points) > 2:
+            try:
+                # 拟合左右车道线的二次多项式
+                left_fit = np.polyfit(left_y, left_points, 2) if len(left_y) > 2 else None
+                right_fit = np.polyfit(right_y, right_points, 2) if len(right_y) > 2 else None
+                
+                if left_fit is not None:
+                    # 计算二阶导数 (d2y/dx2 = 2*a, 其中ax^2+bx+c)
+                    a = left_fit[0]
+                    # 半径 = ((1 + b^2)^1.5) / |2*a| * pixels_per_meter
+                    # 简化: R = 1 / (2*|a|)
+                    if abs(a) > 1e-5:
+                        radius = 1.0 / (2 * abs(a))
+                    else:
+                        radius = float('inf')
+                else:
+                    radius = float('inf')
+            except:
+                radius = float('inf')
+        else:
+            radius = float('inf')
+        
+        self.lane_curvature = curvature
+        self.lane_offset = offset
+        self.lane_radius = radius if radius != float('inf') else 0
+        
+        return curvature, offset, radius, left_center, right_center
     
     def get_command_by_curvature(self, curvature, offset):
         """
@@ -208,7 +262,10 @@ class LaneFollower:
             'last_lane_command': self.last_lane_command,
             'red_light_detected': self.red_light_detected,
             'zebra_crossing_detected': self.zebra_crossing_detected,
-            'frame_count': self.frame_count
+            'frame_count': self.frame_count,
+            'curvature': self.lane_curvature,
+            'offset': self.lane_offset,
+            'radius': self.lane_radius
         }
     
     def print_thresholds(self):
@@ -218,4 +275,4 @@ class LaneFollower:
         print(f"  Gentle Left: < {self.gentle_left_threshold}")
         print(f"  Gentle Right: > {self.gentle_right_threshold}")
         print(f"  Sharp Right: > {self.sharp_right_threshold}")
-        print(f"  ROI Start: {self.roi_start_ratio*100:.0f}% of frame height")
+        print(f"  ROI Start: {self.roi_start_ratio*100:.0f}% of frame height (bottom 1/3)")

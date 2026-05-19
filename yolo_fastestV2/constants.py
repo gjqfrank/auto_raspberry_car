@@ -46,7 +46,7 @@ LANE_SHARP_RIGHT_THRESHOLD = 0.5                            # 急右转阈值
 
 # 车道检测形态学操作参数
 LANE_KERNEL_SIZE = (5, 5)                                   # 形态学操作的卷积核大小
-LANE_ROI_START_RATIO = 0.5                                  # ROI 起始位置比例（从上到下的比例）
+LANE_ROI_START_RATIO = 0.67                                 # ROI 起始位置比例（从上到下的比例，改为2/3处）
 
 # ============================================================================
 # 行人安全距离参数 (Person Safety Distance Parameters)
@@ -67,8 +67,8 @@ ZEBRA_UPPER_WHITE = np.array([180, 30, 255])
 ZEBRA_CROSSING_HORIZONTAL_RATIO_THRESHOLD = 0.05           # 水平条纹比例阈值 (5%)
 ZEBRA_CROSSING_PATTERN_THRESHOLD = 20                       # 最小条纹数量
 ZEBRA_CROSSING_CONFIDENCE_THRESHOLD = 0.6                   # 斑马线确信度阈值
-ZEBRA_CROSSING_ROI_START_RATIO = 0.3                        # ROI 起始位置 (从顶部的百分比)
-ZEBRA_CROSSING_ROI_END_RATIO = 0.9                          # ROI 结束位置 (从顶部的百分比)
+ZEBRA_CROSSING_ROI_START_RATIO = 0.67                       # ROI 起始位置 (从顶部的百分比，改为2/3处)
+ZEBRA_CROSSING_ROI_END_RATIO = 1.0                          # ROI 结束位置 (从顶部的百分比，改为底部)
 
 # 斑马线检测状态平滑参数
 ZEBRA_CROSSING_STATE_HISTORY_SIZE = 5                       # 历史缓冲大小 (帧数)
@@ -123,21 +123,22 @@ ENABLE_TRAFFIC_LIGHT_DETECTION = True                       # ✅ 启用红绿�
 ENABLE_LANE_FOLLOWING = True                                # ✅ 启用车道跟踪
 
 # ============================================================================
+# 显示参数 (Display Parameters) - NEW
+# ============================================================================
+ENABLE_VISUALIZATION = True                                 # 启用完整画面标注显示
+DISPLAY_LANE_MASK = True                                    # 显示车道掩码
+DISPLAY_DETECTION_BOXES = True                              # 显示检测框
+DISPLAY_MODE_INFO = True                                    # 显示模式信息
+DISPLAY_STATS = True                                        # 显示统计信息
+SHOW_VISUAL_OUTPUT = True                                   # 显示视觉输出
+
+# ============================================================================
 # 调试和日志参数 (Debug and Logging Parameters)
 # ============================================================================
 DEBUG_MODE = True                                           # 调试模式开关
 VERBOSE_LOGGING = True                                      # 详细日志开关
 LOG_EVERY_N_FRAMES = 30                                     # 每 N 帧打印一次日志
 LOG_INTERVAL = 30                                           # 日志输出间隔（帧数）
-
-# ============================================================================
-# 显示参数 (Display Parameters)
-# ============================================================================
-DISPLAY_LANE_MASK = True                                    # 显示车道掩码
-DISPLAY_DETECTION_BOXES = True                              # 显示检测框
-DISPLAY_MODE_INFO = True                                    # 显示模式信息
-DISPLAY_STATS = True                                        # 显示统计信息
-SHOW_VISUAL_OUTPUT = True                                   # 显示视觉输出
 
 # ============================================================================
 # 优先级定义 (Priority Levels)

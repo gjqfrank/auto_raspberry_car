@@ -7,6 +7,7 @@ Orchestrates multiple detection modules:
 - Traffic Light Detection (COLOR-BASED)
 - Zebra Crossing Detection (NEW)
 - Lane Following (with zebra crossing awareness)
+- COMPREHENSIVE VISUALIZATION with annotations
 
 ⚠️  DISABLED: Person Safety Detection
 
@@ -46,6 +47,9 @@ from constants import (
     ENABLE_ZEBRA_CROSSING_DETECTION,
     ENABLE_TRAFFIC_LIGHT_DETECTION,
     ENABLE_LANE_FOLLOWING,
+    ENABLE_VISUALIZATION,
+    LANE_ROI_START_RATIO,
+    ZEBRA_CROSSING_ROI_START_RATIO,
 )
 
 # ============================================================================
@@ -53,6 +57,11 @@ from constants import (
 # ============================================================================
 state_lock = Lock()
 exit_flag = {'flag': False}  # Use dict to allow modification in threads
+
+# 全局状态共享变量
+global_traffic_light_state = {'red': False, 'green': False, 'yellow': False}
+global_zebra_crossing_state = {'detected': False, 'mask': None}
+global_lane_state = {'mask': None, 'curvature': 0, 'offset': 0, 'radius': 0}
 
 
 class TrafficLightThread:
@@ -107,13 +116,19 @@ class LaneFollowingThread:
             
             
             h, w, _ = frame.shape
-            lane_mask = self.follower.detect_lane(frame)
-            curvature, offset = self.follower.find_lane_curvature(lane_mask, frame)
+            lane_mask, lane_mask_roi, lane_roi_y = self.follower.detect_lane(frame)
+            curvature, offset, radius, left_x, right_x = self.follower.find_lane_curvature(lane_mask_roi, frame, lane_roi_y)
             command, status, curv, off = self.follower.get_command_by_curvature(curvature, offset)
             
             with self.state_lock:
                 self.follower.red_light_detected = getattr(self, 'red_light_detected', False)
                 self.follower.zebra_crossing_detected = getattr(self, 'zebra_crossing_detected', False)
+                
+                # Update global state for visualization
+                global_lane_state['mask'] = lane_mask
+                global_lane_state['curvature'] = curvature
+                global_lane_state['offset'] = offset
+                global_lane_state['radius'] = radius
             
             # Check priority: red_light > zebra_crossing > lane_following
             # When zebra crossing detected, lane follower continues (safe passage)
@@ -124,36 +139,8 @@ class LaneFollowingThread:
                     mode_info = ""
                     if self.follower.zebra_crossing_detected:
                         mode_info = " [ZEBRA CROSSING]"
-                    print(f"[LANE]{mode_info} {status} | Cmd: {command} | Curv: {curv:.2f}")
+                    print(f"[LANE]{mode_info} {status} | Cmd: {command} | Curv: {curv:.2f} | Radius: {radius:.2f}")
                 self.follower.last_lane_command = command
-            
-            if SHOW_VISUAL_OUTPUT:
-                try:
-                    display_frame = frame.copy()
-                    cv2.putText(display_frame, f"Curvature: {curvature:.2f}", (10, 30), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.putText(display_frame, f"Offset: {offset:.2f}", (10, 70), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    
-                    if self.follower.red_light_detected:
-                        mode_text = "[RED LIGHT - STOP]"
-                        color = (0, 0, 255)
-                    elif self.follower.zebra_crossing_detected:
-                        mode_text = "[ZEBRA CROSSING - CONTINUE]"
-                        color = (255, 0, 0)
-                    else:
-                        mode_text = "[LANE MODE]"
-                        color = (0, 255, 0)
-                    
-                    cv2.putText(display_frame, mode_text, (10, 110), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-                    
-                    display_mask = cv2.cvtColor(lane_mask, cv2.COLOR_GRAY2BGR)
-                    combined = cv2.hstack([display_frame, display_mask])
-                    cv2.imshow('Lane Detection | Mask', combined)
-                except Exception as e:
-                    if DEBUG_MODE:
-                        print(f"[LANE] Warning: Cannot display window - {str(e)}")
 
 
 # ---------------------------------------------------------------------------
@@ -194,10 +181,174 @@ class SharedFrameCapture:
         self.event.set()
 
 
+def draw_lane_annotations(frame, lane_mask, curvature, offset, radius, roi_y_start):
+    """
+    在完整画面上标注车道线、曲率和曲率半径
+    
+    Args:
+        frame: 原始画面
+        lane_mask: 车道检测掩码
+        curvature: 车道曲率
+        offset: 车道偏移
+        radius: 曲率半径
+        roi_y_start: ROI起始Y坐标
+    
+    Returns:
+        标注后的画面
+    """
+    h, w = frame.shape[:2]
+    display_frame = frame.copy()
+    
+    # 绘制ROI区域边界 (绿色边界表示检测区域)
+    roi_height = int(h * (1 - LANE_ROI_START_RATIO))
+    cv2.rectangle(display_frame, (0, roi_y_start), (w, h), (0, 255, 0), 2)
+    cv2.putText(display_frame, "Lane Detection ROI (Bottom 1/3)", (10, roi_y_start - 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    
+    # 从掩码中提取车道线轮廓
+    if lane_mask is not None:
+        # 找到车道线的轮廓
+        contours, _ = cv2.findContours(lane_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # 左右车道线分离
+        left_contours = []
+        right_contours = []
+        
+        for contour in contours:
+            M = cv2.moments(contour)
+            if M['m00'] > 0:
+                cx = int(M['m10'] / M['m00'])
+                if cx < w // 2:
+                    left_contours.append(contour)
+                else:
+                    right_contours.append(contour)
+        
+        # 绘制左车道线 (蓝色)
+        if left_contours:
+            largest_left = max(left_contours, key=cv2.contourArea)
+            cv2.drawContours(display_frame, [largest_left], 0, (255, 0, 0), 3)
+            cv2.putText(display_frame, "Left Lane", (20, roi_y_start + 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+        
+        # 绘制右车道线 (红色)
+        if right_contours:
+            largest_right = max(right_contours, key=cv2.contourArea)
+            cv2.drawContours(display_frame, [largest_right], 0, (0, 0, 255), 3)
+            cv2.putText(display_frame, "Right Lane", (w - 200, roi_y_start + 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+    
+    # 绘制中心线
+    center_x = int(w / 2 + offset * w / 2)
+    cv2.line(display_frame, (center_x, roi_y_start), (center_x, h), (255, 255, 0), 2)
+    
+    # 显示统计信息
+    info_y = 30
+    cv2.putText(display_frame, f"Curvature: {curvature:.3f}", (10, info_y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.putText(display_frame, f"Offset: {offset:.3f}", (10, info_y + 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    
+    # 显示曲率半径 (如果半径有效)
+    if radius > 0 and radius != float('inf'):
+        cv2.putText(display_frame, f"Radius: {radius:.1f} pixels", (10, info_y + 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    else:
+        cv2.putText(display_frame, "Radius: Linear", (10, info_y + 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    
+    return display_frame
+
+
+def draw_zebra_crossing_annotations(frame, zebra_mask, detected, roi_y_start):
+    """
+    在完整画面上标注斑马线检测区域和结果
+    
+    Args:
+        frame: 原始画面
+        zebra_mask: 斑马线检测掩码
+        detected: 是否检测到斑马线
+        roi_y_start: ROI起始Y坐标
+    
+    Returns:
+        标注后的画面
+    """
+    display_frame = frame.copy()
+    h, w = frame.shape[:2]
+    
+    # 绘制ROI区域边界
+    cv2.rectangle(display_frame, (0, roi_y_start), (w, h), (255, 165, 0), 2)
+    
+    # 标注斑马线检测状态
+    if detected:
+        status_text = "🟨 ZEBRA CROSSING DETECTED"
+        color = (0, 255, 255)
+        cv2.putText(display_frame, status_text, (10, roi_y_start - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        
+        # 在检测区域绘制掩码
+        if zebra_mask is not None:
+            zebra_display = cv2.cvtColor(zebra_mask, cv2.COLOR_GRAY2BGR)
+            zebra_display[:, :] = (0, 255, 255)  # 黄色
+            # 叠加到原图
+            mask_alpha = zebra_mask > 0
+            display_frame[roi_y_start:h, :][mask_alpha] = \
+                cv2.addWeighted(display_frame[roi_y_start:h, :][mask_alpha], 0.7,
+                               zebra_display[mask_alpha], 0.3, 0)
+    else:
+        cv2.putText(display_frame, "Zebra Crossing: NOT DETECTED", (10, roi_y_start - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
+    
+    return display_frame
+
+
+def draw_traffic_light_annotations(frame, red_detected, green_detected, yellow_detected):
+    """
+    在完整画面上标注红绿灯检测结果
+    
+    Args:
+        frame: 原始画面
+        red_detected: 是否检测到红灯
+        green_detected: 是否检测到绿灯
+        yellow_detected: 是否检测到黄灯
+    
+    Returns:
+        标注后的画面
+    """
+    display_frame = frame.copy()
+    h, w = frame.shape[:2]
+    
+    # 右上角显示红绿灯状态
+    status_box_y = 30
+    
+    if red_detected:
+        status_text = "🔴 RED LIGHT"
+        color = (0, 0, 255)
+        command_text = "STATUS: STOP"
+    elif green_detected:
+        status_text = "🟢 GREEN LIGHT"
+        color = (0, 255, 0)
+        command_text = "STATUS: GO"
+    elif yellow_detected:
+        status_text = "🟡 YELLOW LIGHT"
+        color = (0, 255, 255)
+        command_text = "STATUS: CAUTION"
+    else:
+        status_text = "⚪ NO LIGHT"
+        color = (200, 200, 200)
+        command_text = "STATUS: UNKNOWN"
+    
+    cv2.putText(display_frame, status_text, (w - 300, status_box_y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+    cv2.putText(display_frame, command_text, (w - 300, status_box_y + 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+    
+    return display_frame
+
+
 def print_system_info():
     """Print system information and configuration"""
     print("=" * 90)
-    print("🚗 Multi-Mode Vehicle Control System (UPDATED)")
+    print("🚗 Multi-Mode Vehicle Control System (UPDATED WITH VISUALIZATION)")
     print("=" * 90)
     print(f"\n📡 Network Configuration:")
     print(f"   Stream URL: {STREAM_URL}")
@@ -214,6 +365,12 @@ def print_system_info():
     print(f"   ✅ Zebra Crossing Detection (NEW)" if ENABLE_ZEBRA_CROSSING_DETECTION else "   ❌ Zebra Crossing Detection")
     print(f"   ✅ Lane Following" if ENABLE_LANE_FOLLOWING else "   ❌ Lane Following")
     print(f"   ❌ Person Detection (DISABLED)" if not ENABLE_PERSON_DETECTION else "   ✅ Person Detection")
+    print(f"\n🎨 Visualization:")
+    print(f"   ✅ COMPREHENSIVE ANNOTATIONS ENABLED" if ENABLE_VISUALIZATION else "   ❌ Visualization disabled")
+    print(f"   • Lane detection areas with left/right lane markers")
+    print(f"   • Curvature and radius of curvature")
+    print(f"   • Zebra crossing detection areas")
+    print(f"   • Traffic light status")
     print(f"\n🎯 Updated Priority System (Person Detection Disabled):")
     print(f"   ┌─ Level 1 (Highest): 🛣️  Zebra Crossing Detection")
     print(f"   │   └─ When zebra crossing detected: CONTINUE lane following (safe passage)")
@@ -258,7 +415,7 @@ def main():
     print("\n📌 Detection Methods:")
     print("   🚦 Traffic Light: COLOR-BASED (no YOLO)")
     print("   🛣️  Zebra Crossing: COLOR-BASED (no YOLO)")
-    print("   🛣️  Lane Following: COLOR-BASED (no YOLO)")
+    print("   🛣️  Lane Following: COLOR-BASED (no YOLO) - Bottom 1/3 only")
     print("   ❌ Person Detection: DISABLED")
     
     # ========================================================================
@@ -314,6 +471,9 @@ def main():
     print("-" * 90)
     
     threads = []
+    lane_thread_obj = None
+    zebra_thread_obj = None
+    traffic_thread_obj = None
     
     # Traffic Light Detection Thread
     if ENABLE_TRAFFIC_LIGHT_DETECTION:
@@ -356,7 +516,7 @@ def main():
         )
         lane_thread.start()
         threads.append(lane_thread)
-        print(f"✅ Lane Following Thread: STARTED")
+        print(f"✅ Lane Following Thread: STARTED (Bottom 1/3 Detection)")
     else:
         print(f"⏭️  Lane Following Thread: SKIPPED (disabled)")
     
@@ -370,7 +530,7 @@ def main():
     print("\n🚗 System is now running. Press 'q' to exit.\n")
     
     # ========================================================================
-    # Main Display Loop
+    # Main Display Loop - WITH COMPREHENSIVE VISUALIZATION
     # ========================================================================
     try:
         while not exit_flag['flag']:
@@ -379,15 +539,52 @@ def main():
                 time.sleep(0.01)
                 continue
             
-            mode_text = "[MULTI-MODE DETECTION]"
-            color = (0, 255, 0)
+            display_frame = frame.copy()
+            h, w = frame.shape[:2]
             
-            cv2.putText(frame, mode_text, (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+            # 添加标题
+            cv2.putText(display_frame, "[COMPREHENSIVE DETECTION & ANNOTATION]", (10, 25),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
-            processed_frame = frame
+            # 绘制车道线标注
+            if ENABLE_LANE_FOLLOWING and lane_thread_obj:
+                lane_roi_y = int(h * LANE_ROI_START_RATIO)
+                lane_mask = global_lane_state['mask']
+                curvature = global_lane_state['curvature']
+                offset = global_lane_state['offset']
+                radius = global_lane_state['radius']
+                
+                if lane_mask is not None:
+                    display_frame = draw_lane_annotations(
+                        display_frame, lane_mask, curvature, offset, radius, lane_roi_y
+                    )
             
-            cv2.imshow('Processed Frame', processed_frame)
+            # 绘制斑马线标注
+            if ENABLE_ZEBRA_CROSSING_DETECTION and zebra_thread_obj:
+                zebra_roi_y = int(h * ZEBRA_CROSSING_ROI_START_RATIO)
+                zebra_detected = zebra_thread_obj.detector.zebra_crossing_detected
+                zebra_mask = zebra_thread_obj.detector.zebra_mask
+                
+                display_frame = draw_zebra_crossing_annotations(
+                    display_frame, zebra_mask, zebra_detected, zebra_roi_y
+                )
+            
+            # 绘制红绿灯标注
+            if ENABLE_TRAFFIC_LIGHT_DETECTION and traffic_thread_obj:
+                red_detected = traffic_thread_obj.detector.red_light_detected
+                green_detected = traffic_thread_obj.detector.traffic_light_state == "GREEN"
+                yellow_detected = traffic_thread_obj.detector.traffic_light_state == "YELLOW"
+                
+                display_frame = draw_traffic_light_annotations(
+                    display_frame, red_detected, green_detected, yellow_detected
+                )
+            
+            cv2.imshow('🚗 Auto Car Control - Full Frame with Annotations', display_frame)
+            
+            # Exit on 'q' key
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                exit_flag['flag'] = True
+                break
     
     except KeyboardInterrupt:
         print("\n⚠️  Program interrupted by user (Ctrl+C)")
