@@ -28,6 +28,7 @@ from traffic_light_detector import TrafficLightDetector
 from zebra_crossing_detector import ZebraCrossingDetector
 from lane_follower import LaneFollower
 import time
+import numpy as np
 
 # ============================================================================
 # Import all constants
@@ -50,6 +51,7 @@ from constants import (
     ENABLE_VISUALIZATION,
     LANE_ROI_START_RATIO,
     ZEBRA_CROSSING_ROI_START_RATIO,
+    ZEBRA_CROSSING_ROI_END_RATIO,
 )
 
 # ============================================================================
@@ -265,7 +267,7 @@ def draw_zebra_crossing_annotations(frame, zebra_mask, detected, roi_y_start):
     
     Args:
         frame: 原始画面
-        zebra_mask: 斑马线检测掩码
+        zebra_mask: 斑马线检测掩码 (ROI大小)
         detected: 是否检测到斑马线
         roi_y_start: ROI起始Y坐标
     
@@ -285,18 +287,24 @@ def draw_zebra_crossing_annotations(frame, zebra_mask, detected, roi_y_start):
         cv2.putText(display_frame, status_text, (10, roi_y_start - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
         
-        # 在检测区域绘制掩码 (FIXED: Added null check for zebra_mask)
+        # 在检测区域绘制掩码 (FIXED: Handle ROI mask shape correctly)
         if zebra_mask is not None and zebra_mask.size > 0:
-            zebra_display = cv2.cvtColor(zebra_mask, cv2.COLOR_GRAY2BGR)
-            zebra_display[:, :] = (0, 255, 255)  # 黄色
-            # 叠加到原图
+            # zebra_mask 是 ROI 大小，需要正确处理 
             mask_alpha = zebra_mask > 0
-            # 确保掩码有有效的区域
             if mask_alpha.any():
+                # 创建黄色显示图像（只在有掩码的区域）
+                zebra_display = np.zeros_like(zebra_mask, dtype=np.uint8)
+                zebra_display[mask_alpha] = 255
+                
+                # 将 ROI 掩码转换为 BGR
+                zebra_display_bgr = cv2.cvtColor(zebra_display, cv2.COLOR_GRAY2BGR)
+                zebra_display_bgr[mask_alpha] = (0, 255, 255)  # 黄色
+                
+                # 获取 ROI 区域并进行加权融合
                 roi_region = display_frame[roi_y_start:h, :]
-                display_frame[roi_y_start:h, :] = \
-                    cv2.addWeighted(roi_region[mask_alpha], 0.7,
-                                   zebra_display[mask_alpha], 0.3, 0)
+                result = cv2.addWeighted(roi_region[mask_alpha], 0.7, 
+                                        zebra_display_bgr[mask_alpha], 0.3, 0)
+                roi_region[mask_alpha] = result
     else:
         cv2.putText(display_frame, "Zebra Crossing: NOT DETECTED", (10, roi_y_start - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
