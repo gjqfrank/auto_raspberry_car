@@ -285,15 +285,18 @@ def draw_zebra_crossing_annotations(frame, zebra_mask, detected, roi_y_start):
         cv2.putText(display_frame, status_text, (10, roi_y_start - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
         
-        # 在检测区域绘制掩码
-        if zebra_mask is not None:
+        # 在检测区域绘制掩码 (FIXED: Added null check for zebra_mask)
+        if zebra_mask is not None and zebra_mask.size > 0:
             zebra_display = cv2.cvtColor(zebra_mask, cv2.COLOR_GRAY2BGR)
             zebra_display[:, :] = (0, 255, 255)  # 黄色
             # 叠加到原图
             mask_alpha = zebra_mask > 0
-            display_frame[roi_y_start:h, :][mask_alpha] = \
-                cv2.addWeighted(display_frame[roi_y_start:h, :][mask_alpha], 0.7,
-                               zebra_display[mask_alpha], 0.3, 0)
+            # 确保掩码有有效的区域
+            if mask_alpha.any():
+                roi_region = display_frame[roi_y_start:h, :]
+                display_frame[roi_y_start:h, :] = \
+                    cv2.addWeighted(roi_region[mask_alpha], 0.7,
+                                   zebra_display[mask_alpha], 0.3, 0)
     else:
         cv2.putText(display_frame, "Zebra Crossing: NOT DETECTED", (10, roi_y_start - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
