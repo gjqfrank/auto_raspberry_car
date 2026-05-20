@@ -35,7 +35,7 @@ PERSON_RIGHT_THRESHOLD = 0.7                                # 右转判断阈值
 # 车道检测参数 (Lane Detection Parameters)
 # ============================================================================
 # 白线颜色范围 (HSV)
-LANE_LOWER_WHITE = np.array([0, 0, 100])
+LANE_LOWER_WHITE = np.array([0, 15, 200])
 LANE_UPPER_WHITE = np.array([180, 30, 255])
 
 # 车道曲率判断阈值
