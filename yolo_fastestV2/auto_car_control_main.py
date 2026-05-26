@@ -359,7 +359,7 @@ def draw_traffic_light_annotations(frame, red_detected, green_detected, yellow_d
 def print_system_info():
     """Print system information and configuration"""
     print("=" * 90)
-    print("🚗 Multi-Mode Vehicle Control System (UPDATED WITH SIMPLIFIED TRAFFIC LIGHT)")
+    print("🚗 Multi-Mode Vehicle Control System (SIMPLIFIED TRAFFIC LIGHT)")
     print("=" * 90)
     print(f"\n📡 Network Configuration:")
     print(f"   Stream URL: {STREAM_URL}")
@@ -385,9 +385,9 @@ def print_system_info():
     print(f"\n🎯 Updated Priority System (Person Detection Disabled):")
     print(f"   ┌─ Level 1 (Highest): 🛣️  Zebra Crossing Detection")
     print(f"   │   └─ When zebra crossing detected: CONTINUE lane following (safe passage)")
-    print(f"   ├─ Level 2 (High): 🚦 Traffic Light Detection (Color-Based - SIMPLIFIED)")
-    print(f"   │   ├─ RED detected: Stop vehicle")
-    print(f"   │   └─ GREEN detected: Continue driving")
+    print(f"   ├─ Level 2 (High): 🚦 Traffic Light Detection (SIMPLIFIED - Direct Area Detection)")
+    print(f"   │   ├─ RED area > 2000px: Stop vehicle")
+    print(f"   │   └─ GREEN area > 2000px: Continue driving")
     print(f"   └─ Level 3 (Lowest): 🛣️  Lane Following Mode")
     print(f"\n📋 All parameters can be modified in: constants.py")
     print(f"🔧 Debug Mode: {'ON' if DEBUG_MODE else 'OFF'}")
@@ -424,7 +424,7 @@ def main():
     print("✅ Model loaded successfully")
     
     print("\n📌 Detection Methods:")
-    print("   🚦 Traffic Light: COLOR-BASED - SIMPLIFIED (no YOLO)")
+    print("   🚦 Traffic Light: COLOR-BASED - SIMPLIFIED (no YOLO, no state smoothing)")
     print("   🛣️  Zebra Crossing: COLOR-BASED (no YOLO)")
     print("   🛣️  Lane Following: COLOR-BASED (no YOLO) - Bottom 1/3 only")
     print("   ❌ Person Detection: DISABLED")
