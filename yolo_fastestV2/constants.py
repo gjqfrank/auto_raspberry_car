@@ -32,9 +32,17 @@ PERSON_LEFT_THRESHOLD = 0.3                                 # 左转判断阈值
 PERSON_RIGHT_THRESHOLD = 0.7                                # 右转判断阈值
 
 # ============================================================================
-# 车道检测参数 (Lane Detection Parameters)
+# 车道检测参数 (Lane Detection Parameters) - IMPROVED
 # ============================================================================
-# 白线颜色范围 (HSV)
+# 改进：采用灰度+Canny边界检测，而非HSV色彩范围（对光线变化更鲁棒）
+LANE_DETECTION_METHOD = "CANNY"                             # 检测方法: "CANNY" 或 "HSV"
+
+# Canny 边界检测参数 (IMPROVED)
+LANE_CANNY_THRESHOLD1 = 50                                  # Canny 下阈值
+LANE_CANNY_THRESHOLD2 = 150                                 # Canny 上阈值
+LANE_GAUSSIAN_BLUR_KERNEL = (5, 5)                          # 高斯模糊核大小
+
+# 白线颜色范围 (HSV) - 保留备用
 LANE_LOWER_WHITE = np.array([0, 15, 200])
 LANE_UPPER_WHITE = np.array([180, 30, 255])
 
@@ -47,6 +55,29 @@ LANE_SHARP_RIGHT_THRESHOLD = 0.5                            # 急右转阈值
 # 车道检测形态学操作参数
 LANE_KERNEL_SIZE = (5, 5)                                   # 形态学操作的卷积核大小
 LANE_ROI_START_RATIO = 0.67                                 # ROI 起始位置比例（从上到下的比例，改为2/3处）
+
+# 直线检测 (Hough Transform) 参数 - IMPROVED
+LANE_HOUGH_RHO = 1                                          # Hough 变换的距离分辨率
+LANE_HOUGH_THETA = np.pi / 180                              # Hough 变换的角度分辨率
+LANE_HOUGH_MIN_THRESHOLD = 15                               # Hough 最小阈值（改进：增加阈值减少噪声）
+LANE_HOUGH_MIN_LINE_LENGTH = 8                              # 最小线长（改进：增加最小线长）
+LANE_HOUGH_MAX_LINE_GAP = 100                               # 最大线间隙（改进：减少最大间隙）
+
+# 斜率过滤参数 - NEW
+LANE_SLOPE_MIN_THRESHOLD = 0.3                              # 最小斜率阈值（过滤接近水平的线）
+LANE_SLOPE_MAX_THRESHOLD = 3.0                              # 最大斜率阈值（可选）
+
+# 区域划分参数
+LANE_BOUNDARY_RATIO = 1/3                                   # 左右车道分割边界比例
+
+# ============================================================================
+# PD 控制器参数 (PD Controller Parameters) - NEW
+# ============================================================================
+LANE_PD_KP = 0.4                                            # 比例系数
+LANE_PD_KD = 0.26                                           # 微分系数 (KD = KP * 0.65)
+LANE_DEAD_ZONE = 3                                          # 死区大小（±度）
+LANE_STEERING_SPEED = 80                                    # 转向速度 (0-100)
+LANE_MOTOR_MAX_SPEED = 25                                   # 电机最大速度
 
 # ============================================================================
 # 行人安全距离参数 (Person Safety Distance Parameters)
@@ -123,7 +154,7 @@ ENABLE_TRAFFIC_LIGHT_DETECTION = True                       # ✅ 启用红绿�
 ENABLE_LANE_FOLLOWING = True                                # ✅ 启用车道跟踪
 
 # ============================================================================
-# 显示参数 (Display Parameters) - NEW
+# 显示参数 (Display Parameters)
 # ============================================================================
 ENABLE_VISUALIZATION = True                                 # 启用完整画面标注显示
 DISPLAY_LANE_MASK = True                                    # 显示车道掩码
@@ -155,7 +186,10 @@ Priority 2 (High): 🛣️  Zebra Crossing Detection
   - 不停止，安全通过斑马线
   
 Priority 3 (Lowest): 🛣️  Lane Following
-  - 默认的车道跟踪模式
+  - 使用改进的 Canny 边界检测方法（对光线变化更鲁棒）
+  - 优化的 Hough 参数减少噪声检测
+  - 斜率过滤消除不合理的线条
+  - PD 控制器确保平滑转向
 
 ❌ DISABLED: 行人检测功能已禁用
 """
@@ -174,4 +208,7 @@ USE_GPU = False                                             # 是否使用 GPU
 GPU_ID = 0                                                  # GPU 设备ID
 NUM_WORKERS = 4                                             # 数据加载工作线程数
 
-print("[CONFIG] Constants loaded successfully - Zebra Crossing & Lane Following enabled, Person Detection disabled")
+print("[CONFIG] ✅ Constants loaded successfully")
+print("[CONFIG] 🚦 Zebra Crossing & Lane Following enabled, Person Detection disabled")
+print("[CONFIG] 🎯 Lane Detection: Improved Canny Edge Detection (robust to lighting)")
+print("[CONFIG] 🔧 PD Controller: KP={}, KD={}, Dead Zone=±{}°".format(LANE_PD_KP, LANE_PD_KD, LANE_DEAD_ZONE))
