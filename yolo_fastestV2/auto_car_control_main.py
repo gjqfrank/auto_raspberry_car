@@ -4,8 +4,8 @@ Multi-mode Vehicle Control System - Main Entry Point (UPDATED)
 ===============================================================
 
 Orchestrates multiple detection modules:
-- Traffic Light Detection (COLOR-BASED)
-- Zebra Crossing Detection (NEW)
+- Traffic Light Detection (COLOR-BASED - SIMPLIFIED)
+- Zebra Crossing Detection
 - Lane Following (with zebra crossing awareness)
 - COMPREHENSIVE VISUALIZATION with annotations
 
@@ -14,7 +14,7 @@ Orchestrates multiple detection modules:
 All parameters are imported from constants.py.
 
 Author: Auto Vehicle Control System
-Date: 2026-05-18
+Date: 2026-05-26
 """
 
 import os
@@ -67,7 +67,7 @@ global_lane_state = {'mask': None, 'curvature': 0, 'offset': 0, 'radius': 0}
 
 
 class TrafficLightThread:
-    """Thread for traffic light detection (COLOR-BASED, no YOLO model needed)"""
+    """Thread for traffic light detection (COLOR-BASED - SIMPLIFIED)"""
     
     def __init__(self, state_lock):
         self.state_lock = state_lock
@@ -79,7 +79,7 @@ class TrafficLightThread:
 
 
 class ZebraCrossingThread:
-    """Thread for zebra crossing detection (NEW)"""
+    """Thread for zebra crossing detection"""
     
     def __init__(self, state_lock):
         self.state_lock = state_lock
@@ -359,7 +359,7 @@ def draw_traffic_light_annotations(frame, red_detected, green_detected, yellow_d
 def print_system_info():
     """Print system information and configuration"""
     print("=" * 90)
-    print("🚗 Multi-Mode Vehicle Control System (UPDATED WITH VISUALIZATION)")
+    print("🚗 Multi-Mode Vehicle Control System (UPDATED WITH SIMPLIFIED TRAFFIC LIGHT)")
     print("=" * 90)
     print(f"\n📡 Network Configuration:")
     print(f"   Stream URL: {STREAM_URL}")
@@ -372,8 +372,8 @@ def print_system_info():
     print(f"   Confidence Threshold: {NMS_CONF_THRESHOLD}")
     print(f"   IoU Threshold: {NMS_IOU_THRESHOLD}")
     print(f"\n🎮 Active Detection Modules:")
-    print(f"   ✅ Traffic Light Detection (COLOR-BASED)" if ENABLE_TRAFFIC_LIGHT_DETECTION else "   ❌ Traffic Light Detection")
-    print(f"   ✅ Zebra Crossing Detection (NEW)" if ENABLE_ZEBRA_CROSSING_DETECTION else "   ❌ Zebra Crossing Detection")
+    print(f"   ✅ Traffic Light Detection (COLOR-BASED - SIMPLIFIED)" if ENABLE_TRAFFIC_LIGHT_DETECTION else "   ❌ Traffic Light Detection")
+    print(f"   ✅ Zebra Crossing Detection" if ENABLE_ZEBRA_CROSSING_DETECTION else "   ❌ Zebra Crossing Detection")
     print(f"   ✅ Lane Following" if ENABLE_LANE_FOLLOWING else "   ❌ Lane Following")
     print(f"   ❌ Person Detection (DISABLED)" if not ENABLE_PERSON_DETECTION else "   ✅ Person Detection")
     print(f"\n🎨 Visualization:")
@@ -385,7 +385,7 @@ def print_system_info():
     print(f"\n🎯 Updated Priority System (Person Detection Disabled):")
     print(f"   ┌─ Level 1 (Highest): 🛣️  Zebra Crossing Detection")
     print(f"   │   └─ When zebra crossing detected: CONTINUE lane following (safe passage)")
-    print(f"   ├─ Level 2 (High): 🚦 Traffic Light Detection (Color-Based)")
+    print(f"   ├─ Level 2 (High): 🚦 Traffic Light Detection (Color-Based - SIMPLIFIED)")
     print(f"   │   ├─ RED detected: Stop vehicle")
     print(f"   │   └─ GREEN detected: Continue driving")
     print(f"   └─ Level 3 (Lowest): 🛣️  Lane Following Mode")
@@ -424,7 +424,7 @@ def main():
     print("✅ Model loaded successfully")
     
     print("\n📌 Detection Methods:")
-    print("   🚦 Traffic Light: COLOR-BASED (no YOLO)")
+    print("   🚦 Traffic Light: COLOR-BASED - SIMPLIFIED (no YOLO)")
     print("   🛣️  Zebra Crossing: COLOR-BASED (no YOLO)")
     print("   🛣️  Lane Following: COLOR-BASED (no YOLO) - Bottom 1/3 only")
     print("   ❌ Person Detection: DISABLED")
@@ -497,11 +497,11 @@ def main():
         )
         traffic_thread.start()
         threads.append(traffic_thread)
-        print(f"✅ Traffic Light Detection Thread: STARTED (COLOR-BASED)")
+        print(f"✅ Traffic Light Detection Thread: STARTED (COLOR-BASED - SIMPLIFIED)")
     else:
         print(f"⏭️  Traffic Light Detection Thread: SKIPPED (disabled)")
     
-    # Zebra Crossing Detection Thread (NEW)
+    # Zebra Crossing Detection Thread
     if ENABLE_ZEBRA_CROSSING_DETECTION:
         zebra_thread_obj = ZebraCrossingThread(state_lock)
         zebra_thread = threading.Thread(
@@ -512,7 +512,7 @@ def main():
         )
         zebra_thread.start()
         threads.append(zebra_thread)
-        print(f"✅ Zebra Crossing Detection Thread: STARTED (NEW)")
+        print(f"✅ Zebra Crossing Detection Thread: STARTED")
     else:
         print(f"⏭️  Zebra Crossing Detection Thread: SKIPPED (disabled)")
     
