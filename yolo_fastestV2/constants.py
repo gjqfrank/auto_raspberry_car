@@ -8,8 +8,8 @@ import numpy as np
 # ============================================================================
 # 网络配置 (Network Configuration)
 # ============================================================================
-STREAM_URL = "http://172.20.10.3:8080/?action=stream"      # 树莓派摄像头流地址
-CONTROL_URL = "http://172.20.10.3:5000/control"            # 树莓派车辆控制地址
+STREAM_URL = "http://172.20.10.5:8080/?action=stream"      # 树莓派摄像头流地址
+CONTROL_URL = "http://172.20.10.5:5000/control"            # 树莓派车辆控制地址
 
 # ============================================================================
 # 模型配置 (Model Configuration)
@@ -35,7 +35,7 @@ PERSON_RIGHT_THRESHOLD = 0.7                                # 右转判断阈值
 # 车道检测参数 (Lane Detection Parameters) - IMPROVED
 # ============================================================================
 # 改进：采用灰度+Canny边界检测，而非HSV色彩范围（对光线变化更鲁棒）
-LANE_DETECTION_METHOD = "CANNY"                             # 检测方法: "CANNY" 或 "HSV"
+LANE_DETECTION_METHOD = "HSV"                             # 检测方法: "CANNY" 或 "HSV"
 
 # Canny 边界检测参数 (IMPROVED)
 LANE_CANNY_THRESHOLD1 = 50                                  # Canny 下阈值
@@ -43,8 +43,8 @@ LANE_CANNY_THRESHOLD2 = 150                                 # Canny 上阈值
 LANE_GAUSSIAN_BLUR_KERNEL = (5, 5)                          # 高斯模糊核大小
 
 # 白线颜色范围 (HSV) - 保留备用
-LANE_LOWER_WHITE = np.array([0, 15, 200])
-LANE_UPPER_WHITE = np.array([180, 30, 255])
+LANE_LOWER_WHITE = np.array([150, 8, 60])
+LANE_UPPER_WHITE = np.array([200, 20, 80])
 
 # 车道曲率判断阈值
 LANE_SHARP_LEFT_THRESHOLD = -0.5                            # 急左转阈值
