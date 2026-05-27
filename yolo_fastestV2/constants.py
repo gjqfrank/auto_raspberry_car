@@ -43,8 +43,8 @@ LANE_CANNY_THRESHOLD2 = 150                                 # Canny 上阈值
 LANE_GAUSSIAN_BLUR_KERNEL = (5, 5)                          # 高斯模糊核大小
 
 # 白线颜色范围 (HSV) - 用于白色线条检测
-LANE_LOWER_WHITE = np.array([0, 0, 180])                    # HSV 下界：低饱和度，高亮度（白色）
-LANE_UPPER_WHITE = np.array([180, 40, 255])                 # HSV 上界：低饱和度，高亮度（白色）
+LANE_LOWER_WHITE = np.array([150, 8, 60])                    # HSV 下界：低饱和度，高亮度（白色）
+LANE_UPPER_WHITE = np.array([200, 20, 80])                 # HSV 上界：低饱和度，高亮度（白色）
 
 # 车道曲率判断阈值
 LANE_SHARP_LEFT_THRESHOLD = -0.5                            # 急左转阈值
