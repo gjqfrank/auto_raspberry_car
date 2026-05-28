@@ -53,18 +53,20 @@ throttle.stop()
 """
 
 def detect_edges(frame):
-    # filter for blue lane lines
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    #cv2.imshow("HSV",hsv)
-    lower_white = np.array([150, 8, 30], dtype = "uint8")
-    upper_white = np.array([200, 20, 80], dtype="uint8")
-    mask = cv2.inRange(hsv,lower_white,upper_white)
-    #cv2.imshow("mask",mask)
-    
-    # detect edges
-    edges = cv2.Canny(mask, 50, 100)
-    #cv2.imshow("edges",edges)
-    
+
+    lower_white = np.array([0, 0, 150], dtype="uint8")
+    upper_white = np.array([180, 50, 255], dtype="uint8")
+    mask = cv2.inRange(hsv, lower_white, upper_white)
+
+    mask = cv2.GaussianBlur(mask, (5, 5), 0)
+
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    edges = cv2.Canny(mask, 50, 150)
+
     return edges
 
 def region_of_interest(edges):
@@ -98,29 +100,30 @@ def detect_line_segments(cropped_edges):
 
 def average_slope_intercept(frame, line_segments):
     lane_lines = []
-    
+
     if line_segments is None:
-        print("no line segments detected")
         return lane_lines
 
-    height, width,_ = frame.shape
+    height, width, _ = frame.shape
     left_fit = []
     right_fit = []
 
     boundary = 1/3
     left_region_boundary = width * (1 - boundary)
     right_region_boundary = width * boundary
-    
+
     for line_segment in line_segments:
         for x1, y1, x2, y2 in line_segment:
             if x1 == x2:
-                print("skipping vertical lines (slope = infinity")
                 continue
-            
+
             fit = np.polyfit((x1, x2), (y1, y2), 1)
             slope = (y2 - y1) / (x2 - x1)
             intercept = y1 - (slope * x1)
-            
+
+            if abs(slope) < 0.3:
+                continue
+
             if slope < 0:
                 if x1 < left_region_boundary and x2 < left_region_boundary:
                     left_fit.append((slope, intercept))
@@ -128,12 +131,12 @@ def average_slope_intercept(frame, line_segments):
                 if x1 > right_region_boundary and x2 > right_region_boundary:
                     right_fit.append((slope, intercept))
 
-    left_fit_average = np.average(left_fit, axis=0)
     if len(left_fit) > 0:
+        left_fit_average = np.average(left_fit, axis=0)
         lane_lines.append(make_points(frame, left_fit_average))
 
-    right_fit_average = np.average(right_fit, axis=0)
     if len(right_fit) > 0:
+        right_fit_average = np.average(right_fit, axis=0)
         lane_lines.append(make_points(frame, right_fit_average))
 
     return lane_lines
@@ -183,30 +186,33 @@ def display_heading_line(frame, steering_angle, line_color=(0, 0, 255), line_wid
     return heading_image
 
 def get_steering_angle(frame, lane_lines):
-    
+
     height,width,_ = frame.shape
-    
+
     if len(lane_lines) == 2:
         _, _, left_x2, _ = lane_lines[0][0]
         _, _, right_x2, _ = lane_lines[1][0]
         mid = int(width / 2)
         x_offset = (left_x2 + right_x2) / 2 - mid
         y_offset = int(height / 2)
-        
+
     elif len(lane_lines) == 1:
         x1, _, x2, _ = lane_lines[0][0]
         x_offset = x2 - x1
         y_offset = int(height / 2)
-        
-    elif len(lane_lines) == 0:
+
+    else:
         x_offset = 0
         y_offset = int(height / 2)
-        
+
     angle_to_mid_radian = math.atan(x_offset / y_offset)
-    angle_to_mid_deg = int(angle_to_mid_radian * 180.0 / math.pi)  
+    angle_to_mid_deg = int(angle_to_mid_radian * 180.0 / math.pi)
     steering_angle = angle_to_mid_deg + 90
-    
+
     return steering_angle
+
+lane_history = []
+LANE_HISTORY_SIZE = 5
 
 video = cv2.VideoCapture(stream_url)
 video.set(cv2.CAP_PROP_FRAME_WIDTH,320)
@@ -229,13 +235,32 @@ while True:
     ret,frame = video.read()
     if CAMERA_BRIGHTNESS_GAIN != 1.0:
         frame = np.clip(frame * CAMERA_BRIGHTNESS_GAIN, 0, 255).astype(np.uint8)
-    # frame = cv2.flip(frame,2)
-    
+
     cv2.imshow("original",frame)
     edges = detect_edges(frame)
     roi = region_of_interest(edges)
     line_segments = detect_line_segments(roi)
     lane_lines = average_slope_intercept(frame,line_segments)
+
+    lane_history.append(lane_lines)
+    if len(lane_history) > LANE_HISTORY_SIZE:
+        lane_history.pop(0)
+
+    if len(lane_history) >= 3:
+        valid_count = sum(1 for ll in lane_history if len(ll) >= 2)
+        if valid_count >= 2:
+            avg_lane_lines = []
+            for i in range(2):
+                line_points = [lane_history[j][i] for j in range(len(lane_history)) if len(lane_history[j]) > i]
+                if line_points:
+                    x_coords = [p[0][0] for p in line_points] + [p[0][2] for p in line_points]
+                    y_coords = [p[0][1] for p in line_points] + [p[0][3] for p in line_points]
+                    if x_coords and y_coords:
+                        z = np.polyfit(x_coords, y_coords, 1)
+                        avg_lane_lines.append(make_points(frame, z))
+            if len(avg_lane_lines) == 2:
+                lane_lines = avg_lane_lines
+
     lane_lines_image = display_lines(frame,lane_lines)
     steering_angle = get_steering_angle(frame, lane_lines)
     heading_image = display_heading_line(lane_lines_image,steering_angle)
