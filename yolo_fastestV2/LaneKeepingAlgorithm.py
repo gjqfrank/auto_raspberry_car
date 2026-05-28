@@ -174,17 +174,21 @@ def display_lines(frame, lines, line_color=(0, 255, 0), line_width=6):
 def display_heading_line(frame, steering_angle, line_color=(0, 0, 255), line_width=5 ):
     heading_image = np.zeros_like(frame)
     height, width, _ = frame.shape
-    
+
     steering_angle_radian = steering_angle / 180.0 * math.pi
-    
+
     x1 = int(width / 2)
     y1 = height
-    x2 = int(x1 - height / 2 / math.tan(steering_angle_radian))
+
+    tan_val = math.tan(steering_angle_radian)
+    if abs(tan_val) < 0.001:
+        tan_val = 0.001
+    x2 = int(x1 - height / 2 / tan_val)
     y2 = int(height / 2)
-    
+
     cv2.line(heading_image, (x1, y1), (x2, y2), line_color, line_width)
     heading_image = cv2.addWeighted(frame, 0.8, heading_image, 1, 1)
-    
+
     return heading_image
 
 def get_steering_angle(frame, lane_lines):
@@ -241,6 +245,9 @@ kd = kp * 0.65
 
 while True:
     ret, frame = video.read()
+    if not ret or frame is None or frame.size == 0:
+        continue
+
     if CAMERA_BRIGHTNESS_GAIN != 1.0:
         frame = np.clip(frame * CAMERA_BRIGHTNESS_GAIN, 0, 255).astype(np.uint8)
 
@@ -270,7 +277,7 @@ while True:
                 if line_points:
                     x_coords = [p[0][0] for p in line_points] + [p[0][2] for p in line_points]
                     y_coords = [p[0][1] for p in line_points] + [p[0][3] for p in line_points]
-                    if x_coords and y_coords:
+                    if len(set(x_coords)) > 1 and len(set(y_coords)) > 1:
                         z = np.polyfit(x_coords, y_coords, 1)
                         avg_lane_lines.append(make_points(frame, z))
             if len(avg_lane_lines) == 2:
