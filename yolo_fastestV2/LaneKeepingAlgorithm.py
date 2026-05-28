@@ -93,10 +93,10 @@ def region_of_interest(edges):
 def detect_line_segments(cropped_edges):
     rho = 1
     theta = np.pi / 180
-    min_threshold = 10
+    min_threshold = 8
 
     line_segments = cv2.HoughLinesP(cropped_edges, rho, theta, min_threshold,
-                                    np.array([]), minLineLength=5, maxLineGap=100)
+                                    np.array([]), minLineLength=3, maxLineGap=150)
 
     return line_segments
 
@@ -123,7 +123,7 @@ def average_slope_intercept(frame, line_segments):
             slope = (y2 - y1) / (x2 - x1)
             intercept = y1 - (slope * x1)
 
-            if abs(slope) < 0.3:
+            if abs(slope) < 0.2:
                 continue
 
             if slope < 0:
@@ -195,7 +195,18 @@ def get_steering_angle(frame, lane_lines):
 
     height,width,_ = frame.shape
 
+    global curve_or_intersection_detected
+
     if len(lane_lines) == 2:
+        x1_left, y1_left, x2_left, y2_left = lane_lines[0][0]
+        x1_right, y1_right, x2_right, y2_right = lane_lines[1][0]
+
+        slope_left = (y2_left - y1_left) / (x2_left - x1_left) if x2_left != x1_left else 0
+        slope_right = (y2_right - y1_right) / (x2_right - x1_right) if x2_right != x1_right else 0
+
+        if slope_left > 0.3 or slope_right < -0.3:
+            curve_or_intersection_detected = True
+
         _, _, left_x2, _ = lane_lines[0][0]
         _, _, right_x2, _ = lane_lines[1][0]
         mid = int(width / 2)
@@ -233,9 +244,17 @@ FRAME_BUFFER_SIZE = 3
 steering_history = []
 STEERING_HISTORY_SIZE = 3
 
+curve_or_intersection_detected = False
+curve_frame_count = 0
+CURVE_DETECT_FRAMES = 3
+
 video = cv2.VideoCapture(stream_url)
-video.set(cv2.CAP_PROP_FRAME_WIDTH,320)
-video.set(cv2.CAP_PROP_FRAME_HEIGHT,240)
+video.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+video.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+video.set(cv2.CAP_PROP_FPS, 30)
+
+video.set(cv2.CAP_PROP_EXPOSURE, 50)
+video.set(cv2.CAP_PROP_GAIN, 1.0)
 
 time.sleep(1)
 
@@ -254,6 +273,8 @@ while True:
     ret, frame = video.read()
     if not ret or frame is None or frame.size == 0:
         continue
+
+    curve_or_intersection_detected = False
 
     if CAMERA_BRIGHTNESS_GAIN != 1.0:
         frame = np.clip(frame * CAMERA_BRIGHTNESS_GAIN, 0, 255).astype(np.uint8)
@@ -310,8 +331,16 @@ while True:
 
     curvature = abs(deviation) / 90.0
     base_speed = 8
-    speed_reduction = min(curvature * 5, 4)
-    speed = max(base_speed - speed_reduction, 4)
+
+    if curve_or_intersection_detected:
+        speed = 4
+        curve_frame_count += 1
+        if curve_frame_count > CURVE_DETECT_FRAMES:
+            curve_or_intersection_detected = False
+            curve_frame_count = 0
+    else:
+        speed_reduction = min(curvature * 5, 4)
+        speed = max(base_speed - speed_reduction, 4)
     
     if deviation < 5 and deviation > -5:
         deviation = 0
