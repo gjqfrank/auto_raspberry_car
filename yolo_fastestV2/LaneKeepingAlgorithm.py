@@ -219,6 +219,9 @@ LANE_HISTORY_SIZE = 5
 frame_buffer = []
 FRAME_BUFFER_SIZE = 3
 
+steering_history = []
+STEERING_HISTORY_SIZE = 3
+
 video = cv2.VideoCapture(stream_url)
 video.set(cv2.CAP_PROP_FRAME_WIDTH,320)
 video.set(cv2.CAP_PROP_FRAME_HEIGHT,240)
@@ -275,14 +278,26 @@ while True:
 
     lane_lines_image = display_lines(frame,lane_lines)
     steering_angle = get_steering_angle(frame, lane_lines)
-    heading_image = display_heading_line(lane_lines_image,steering_angle)
-    cv2.imshow("heading line",heading_image)
+
+    steering_history.append(steering_angle)
+    if len(steering_history) > STEERING_HISTORY_SIZE:
+        steering_history.pop(0)
+
+    smoothed_steering = int(np.mean(steering_history))
+
+    heading_image = display_heading_line(lane_lines_image, smoothed_steering)
+    cv2.imshow("heading line", heading_image)
 
     now = time.time()
     dt = now - lastTime
 
-    deviation = steering_angle - 90
+    deviation = smoothed_steering - 90
     error = abs(deviation)
+
+    curvature = abs(deviation) / 90.0
+    base_speed = 8
+    speed_reduction = min(curvature * 5, 4)
+    speed = max(base_speed - speed_reduction, 4)
     
     if deviation < 5 and deviation > -5:
         deviation = 0
