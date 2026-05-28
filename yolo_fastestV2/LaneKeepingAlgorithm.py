@@ -55,15 +55,18 @@ throttle.stop()
 def detect_edges(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    lower_white = np.array([0, 0, 150], dtype="uint8")
-    upper_white = np.array([180, 50, 255], dtype="uint8")
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    v_channel = clahe.apply(hsv[:, :, 2])
+
+    lower_white = np.array([0, 0, 100])
+    upper_white = np.array([180, 50, 255])
     mask = cv2.inRange(hsv, lower_white, upper_white)
 
     mask = cv2.GaussianBlur(mask, (5, 5), 0)
 
     kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
 
     edges = cv2.Canny(mask, 50, 150)
 
@@ -73,12 +76,11 @@ def region_of_interest(edges):
     height, width = edges.shape
     mask = np.zeros_like(edges)
 
-    # only focus lower half of the screen
     polygon = np.array([[
         (0, height),
-        (0,  height/2),
-        (width , height/2),
-        (width , height),
+        (0,  height * 0.65),
+        (width, height * 0.65),
+        (width, height),
     ]], np.int32)
     
     cv2.fillPoly(mask, polygon, 255)
@@ -89,12 +91,12 @@ def region_of_interest(edges):
     return cropped_edges
 
 def detect_line_segments(cropped_edges):
-    rho = 1  
-    theta = np.pi / 180  
-    min_threshold = 10  
-    
-    line_segments = cv2.HoughLinesP(cropped_edges, rho, theta, min_threshold, 
-                                    np.array([]), minLineLength=5, maxLineGap=150)
+    rho = 1
+    theta = np.pi / 180
+    min_threshold = 15
+
+    line_segments = cv2.HoughLinesP(cropped_edges, rho, theta, min_threshold,
+                                    np.array([]), minLineLength=10, maxLineGap=80)
 
     return line_segments
 
@@ -121,7 +123,7 @@ def average_slope_intercept(frame, line_segments):
             slope = (y2 - y1) / (x2 - x1)
             intercept = y1 - (slope * x1)
 
-            if abs(slope) < 0.3:
+            if abs(slope) < 0.5:
                 continue
 
             if slope < 0:
@@ -212,7 +214,7 @@ def get_steering_angle(frame, lane_lines):
     return steering_angle
 
 lane_history = []
-LANE_HISTORY_SIZE = 5
+LANE_HISTORY_SIZE = 7
 
 video = cv2.VideoCapture(stream_url)
 video.set(cv2.CAP_PROP_FRAME_WIDTH,320)
@@ -246,9 +248,9 @@ while True:
     if len(lane_history) > LANE_HISTORY_SIZE:
         lane_history.pop(0)
 
-    if len(lane_history) >= 3:
+    if len(lane_history) >= 5:
         valid_count = sum(1 for ll in lane_history if len(ll) >= 2)
-        if valid_count >= 2:
+        if valid_count >= 4:
             avg_lane_lines = []
             for i in range(2):
                 line_points = [lane_history[j][i] for j in range(len(lane_history)) if len(lane_history[j]) > i]
