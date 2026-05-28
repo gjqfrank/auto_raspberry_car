@@ -12,7 +12,7 @@ import requests
 stream_url = "http://172.20.10.5:8080/?action=stream"    # 这里请替换为你的树莓派 IP 地址
 control_url = "http://172.20.10.5:5000/control"
 
-CAMERA_BRIGHTNESS_GAIN = 1.0  # 摄像头亮度增益 (1.0 = 不变, >1.0 增亮, <1.0 变暗)
+CAMERA_BRIGHTNESS_GAIN = 1.1  # 摄像头亮度增益 (1.0 = 不变, >1.0 增亮, <1.0 变暗)
 
 """
 GPIO.setwarnings(False)
