@@ -55,11 +55,11 @@ throttle.stop()
 def detect_edges(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(4, 4))
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(4, 4))
     hsv[:, :, 2] = clahe.apply(hsv[:, :, 2])
 
-    lower_white = np.array([0, 0, 200])
-    upper_white = np.array([180, 30, 255])
+    lower_white = np.array([0, 0, 180])
+    upper_white = np.array([180, 40, 255])
     mask = cv2.inRange(hsv, lower_white, upper_white)
 
     mask = cv2.GaussianBlur(mask, (3, 3), 0)
@@ -96,7 +96,7 @@ def detect_line_segments(cropped_edges):
     min_threshold = 8
 
     line_segments = cv2.HoughLinesP(cropped_edges, rho, theta, min_threshold,
-                                    np.array([]), minLineLength=3, maxLineGap=150)
+                                    np.array([]), minLineLength=2, maxLineGap=150)
 
     return line_segments
 
@@ -123,7 +123,7 @@ def average_slope_intercept(frame, line_segments):
             slope = (y2 - y1) / (x2 - x1)
             intercept = y1 - (slope * x1)
 
-            if abs(slope) < 0.2:
+            if abs(slope) < 0.15:
                 continue
 
             if slope < 0:
@@ -214,15 +214,8 @@ def get_steering_angle(frame, lane_lines):
         y_offset = int(height / 2)
 
     elif len(lane_lines) == 1:
-        x1, y1, x2, y2 = lane_lines[0][0]
-        slope = (y2 - y1) / (x2 - x1) if x2 != x1 else 0
-
-        if slope < 0:
-            mid = int(width / 2)
-            x_offset = x2 - mid + width * 0.15
-        else:
-            mid = int(width / 2)
-            x_offset = x2 - mid - width * 0.15
+        x1, _, x2, _ = lane_lines[0][0]
+        x_offset = x2 - x1
         y_offset = int(height / 2)
 
     else:
