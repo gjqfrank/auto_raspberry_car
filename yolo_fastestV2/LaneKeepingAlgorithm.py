@@ -203,8 +203,15 @@ def get_steering_angle(frame, lane_lines):
         y_offset = int(height / 2)
 
     elif len(lane_lines) == 1:
-        x1, _, x2, _ = lane_lines[0][0]
-        x_offset = x2 - x1
+        x1, y1, x2, y2 = lane_lines[0][0]
+        slope = (y2 - y1) / (x2 - x1) if x2 != x1 else 0
+
+        if slope < 0:
+            mid = int(width / 2)
+            x_offset = x2 - mid + width * 0.15
+        else:
+            mid = int(width / 2)
+            x_offset = x2 - mid - width * 0.15
         y_offset = int(height / 2)
 
     else:
