@@ -52,7 +52,7 @@ throttle.stop()
 
 def detect_edges(frame):
     # filter for blue lane lines
-    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     #cv2.imshow("HSV",hsv)
     lower_blue = np.array([150, 8, 30], dtype = "uint8")
     upper_blue = np.array([200, 20, 80], dtype="uint8")
@@ -225,7 +225,7 @@ kd = kp * 0.65
 
 while True:
     ret,frame = video.read()
-    frame = cv2.flip(frame,2)
+    # frame = cv2.flip(frame,2)
     
     cv2.imshow("original",frame)
     edges = detect_edges(frame)
