@@ -55,20 +55,20 @@ throttle.stop()
 def detect_edges(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    v_channel = clahe.apply(hsv[:, :, 2])
+    clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(4, 4))
+    hsv[:, :, 2] = clahe.apply(hsv[:, :, 2])
 
-    lower_white = np.array([0, 0, 100])
-    upper_white = np.array([180, 50, 255])
+    lower_white = np.array([0, 0, 200])
+    upper_white = np.array([180, 30, 255])
     mask = cv2.inRange(hsv, lower_white, upper_white)
 
-    mask = cv2.GaussianBlur(mask, (5, 5), 0)
+    mask = cv2.GaussianBlur(mask, (3, 3), 0)
 
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+    kernel = np.ones((2, 2), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
 
-    edges = cv2.Canny(mask, 50, 150)
+    edges = cv2.Canny(mask, 30, 100)
 
     return edges
 
@@ -78,8 +78,8 @@ def region_of_interest(edges):
 
     polygon = np.array([[
         (0, height),
-        (0,  height * 0.65),
-        (width, height * 0.65),
+        (0, height / 2),
+        (width, height / 2),
         (width, height),
     ]], np.int32)
     
@@ -93,10 +93,10 @@ def region_of_interest(edges):
 def detect_line_segments(cropped_edges):
     rho = 1
     theta = np.pi / 180
-    min_threshold = 15
+    min_threshold = 10
 
     line_segments = cv2.HoughLinesP(cropped_edges, rho, theta, min_threshold,
-                                    np.array([]), minLineLength=10, maxLineGap=80)
+                                    np.array([]), minLineLength=5, maxLineGap=100)
 
     return line_segments
 
@@ -123,7 +123,7 @@ def average_slope_intercept(frame, line_segments):
             slope = (y2 - y1) / (x2 - x1)
             intercept = y1 - (slope * x1)
 
-            if abs(slope) < 0.5:
+            if abs(slope) < 0.3:
                 continue
 
             if slope < 0:
@@ -214,7 +214,10 @@ def get_steering_angle(frame, lane_lines):
     return steering_angle
 
 lane_history = []
-LANE_HISTORY_SIZE = 7
+LANE_HISTORY_SIZE = 5
+
+frame_buffer = []
+FRAME_BUFFER_SIZE = 3
 
 video = cv2.VideoCapture(stream_url)
 video.set(cv2.CAP_PROP_FRAME_WIDTH,320)
@@ -234,11 +237,18 @@ kp = 0.4
 kd = kp * 0.65
 
 while True:
-    ret,frame = video.read()
+    ret, frame = video.read()
     if CAMERA_BRIGHTNESS_GAIN != 1.0:
         frame = np.clip(frame * CAMERA_BRIGHTNESS_GAIN, 0, 255).astype(np.uint8)
 
-    cv2.imshow("original",frame)
+    frame_buffer.append(frame.astype(np.float32))
+    if len(frame_buffer) > FRAME_BUFFER_SIZE:
+        frame_buffer.pop(0)
+
+    if len(frame_buffer) == FRAME_BUFFER_SIZE:
+        frame = np.mean(frame_buffer, axis=0).astype(np.uint8)
+
+    cv2.imshow("original", frame)
     edges = detect_edges(frame)
     roi = region_of_interest(edges)
     line_segments = detect_line_segments(roi)
@@ -248,9 +258,9 @@ while True:
     if len(lane_history) > LANE_HISTORY_SIZE:
         lane_history.pop(0)
 
-    if len(lane_history) >= 5:
+    if len(lane_history) >= 3:
         valid_count = sum(1 for ll in lane_history if len(ll) >= 2)
-        if valid_count >= 4:
+        if valid_count >= 2:
             avg_lane_lines = []
             for i in range(2):
                 line_points = [lane_history[j][i] for j in range(len(lane_history)) if len(lane_history[j]) > i]
