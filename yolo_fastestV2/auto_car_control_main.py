@@ -52,6 +52,7 @@ from constants import (
     LANE_ROI_START_RATIO,
     ZEBRA_CROSSING_ROI_START_RATIO,
     ZEBRA_CROSSING_ROI_END_RATIO,
+    CAMERA_BRIGHTNESS_GAIN,
 )
 
 # ============================================================================
@@ -454,8 +455,11 @@ def main():
                 time.sleep(0.1)
                 continue
             retry_count = 0
+
+            if CAMERA_BRIGHTNESS_GAIN != 1.0:
+                frame = np.clip(frame * CAMERA_BRIGHTNESS_GAIN, 0, 255).astype(np.uint8)
+
             shared_cap.update_frame(ret, frame)
-        # signal consumers to stop
         shared_cap.stop()
 
     frame_reader = threading.Thread(
