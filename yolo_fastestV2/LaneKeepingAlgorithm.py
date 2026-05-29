@@ -329,23 +329,70 @@ def display_lines(frame, lines, line_color=(0, 255, 0), line_width=6):
 
     return line_image
 
-def display_heading_line(frame, steering_angle, line_color=(0, 0, 255), line_width=5 ):
+def display_heading_line(frame, lane_lines, steering_angle, line_color=(0, 0, 255), line_width=5):
     heading_image = np.zeros_like(frame)
     height, width, _ = frame.shape
 
-    steering_angle_radian = steering_angle / 180.0 * math.pi
-
-    x1 = int(width / 2)
-    y1 = height
-
-    tan_val = math.tan(steering_angle_radian)
-    if abs(tan_val) < 0.001:
-        tan_val = 0.001
-    x2 = int(x1 - height / 2 / tan_val)
-    y2 = int(height / 2)
-
-    cv2.line(heading_image, (x1, y1), (x2, y2), line_color, line_width)
-    heading_image = cv2.addWeighted(frame, 0.8, heading_image, 1, 1)
+    if lane_lines is not None and len(lane_lines) >= 2:
+        left_line = lane_lines[0][0]
+        right_line = lane_lines[1][0]
+        
+        prev_x = None
+        for y in range(height, int(height * 0.3), -5):
+            if len(left_line) == 6 and len(right_line) == 6:
+                a_l, b_l, c_l = left_line[4], left_line[5], left_line[0] - left_line[4] * left_line[1]**2 - left_line[5] * left_line[1]
+                a_r, b_r, c_r = right_line[4], right_line[5], right_line[0] - right_line[4] * right_line[1]**2 - right_line[5] * right_line[1]
+                x_left = int(a_l * y**2 + b_l * y + c_l)
+                x_right = int(a_r * y**2 + b_r * y + c_r)
+            else:
+                x1_l, y1_l, x2_l, y2_l = left_line[:4]
+                x1_r, y1_r, x2_r, y2_r = right_line[:4]
+                
+                slope_l = (y2_l - y1_l) / (x2_l - x1_l) if x2_l != x1_l else 0.001
+                slope_r = (y2_r - y1_r) / (x2_r - x1_r) if x2_r != x1_r else 0.001
+                
+                intercept_l = y1_l - slope_l * x1_l
+                intercept_r = y1_r - slope_r * x1_r
+                
+                x_left = int((y - intercept_l) / slope_l)
+                x_right = int((y - intercept_r) / slope_r)
+            
+            x_center = (x_left + x_right) // 2
+            
+            if prev_x is not None and abs(x_center - prev_x) < 50:
+                cv2.line(heading_image, (prev_x, y + 5), (x_center, y), line_color, line_width)
+            
+            prev_x = x_center
+        
+        heading_image = cv2.addWeighted(frame, 0.8, heading_image, 1, 1)
+    elif lane_lines is not None and len(lane_lines) == 1:
+        heading_image = frame.copy()
+        line = lane_lines[0][0]
+        
+        if len(line) == 6:
+            a, b = line[4], line[5]
+            c = line[0] - a * line[1]**2 - b * line[1]
+            
+            prev_x = None
+            for y in range(height, int(height * 0.3), -5):
+                x = int(a * y**2 + b * y + c)
+                if prev_x is not None:
+                    cv2.line(heading_image, (prev_x, y + 5), (x, y), line_color, line_width)
+                prev_x = x
+        else:
+            x1, y1, x2, y2 = line[:4]
+            cv2.line(heading_image, (x1, y1), (x2, y2), line_color, line_width)
+    else:
+        steering_angle_radian = steering_angle / 180.0 * math.pi
+        x1 = int(width / 2)
+        y1 = height
+        tan_val = math.tan(steering_angle_radian)
+        if abs(tan_val) < 0.001:
+            tan_val = 0.001
+        x2 = int(x1 - height / 2 / tan_val)
+        y2 = int(height / 2)
+        cv2.line(heading_image, (x1, y1), (x2, y2), line_color, line_width)
+        heading_image = cv2.addWeighted(frame, 0.8, heading_image, 1, 1)
 
     return heading_image
 
@@ -495,7 +542,7 @@ while True:
 
     smoothed_steering = int(np.mean(steering_history))
 
-    heading_image = display_heading_line(lane_lines_image, smoothed_steering)
+    heading_image = display_heading_line(lane_lines_image, lane_lines, smoothed_steering)
     # cv2.imshow("heading line", heading_image)
 
     combined = combine_windows_2x2(frame, edges_with_curves, roi, heading_image)
