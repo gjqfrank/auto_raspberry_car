@@ -9,48 +9,10 @@ import time
 # import utils.utils
 import requests
 
-stream_url = "http://172.20.10.5:8080/?action=stream"    # 这里请替换为你的树莓派 IP 地址
+stream_url = "http://172.20.10.5:8080/?action=stream"
 control_url = "http://172.20.10.5:5000/control"
 
-CAMERA_BRIGHTNESS_GAIN = 1.1  # 摄像头亮度增益 (1.0 = 不变, >1.0 增亮, <1.0 变暗)
-
-"""
-GPIO.setwarnings(False)
-
-#throttle
-throttlePin = 25 # Physical pin 22
-in3 = 23 # physical Pin 16
-in4 = 24 # physical Pin 18
-
-#Steering
-steeringPin = 22 # Physical Pin 15
-in1 = 17 # Physical Pin 11
-in2 = 27 # Physical Pin 13
-
-
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(in1,GPIO.OUT)
-GPIO.setup(in2,GPIO.OUT)
-GPIO.setup(in3,GPIO.OUT)
-GPIO.setup(in4,GPIO.OUT)
-
-GPIO.setup(throttlePin,GPIO.OUT)
-GPIO.setup(steeringPin,GPIO.OUT)
-
-# Steering
-# in1 = 1 and in2 = 0 -> Left
-GPIO.output(in1,GPIO.LOW)
-GPIO.output(in2,GPIO.LOW)
-steering = GPIO.PWM(steeringPin,1000)
-steering.stop()
-
-# Throttle
-# in3 = 1 and in4 = 0 -> Forward
-GPIO.output(in3,GPIO.HIGH)
-GPIO.output(in4,GPIO.LOW)
-throttle = GPIO.PWM(throttlePin,1000)
-throttle.stop()
-"""
+CAMERA_BRIGHTNESS_GAIN = 1.1
 
 def detect_edges(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -81,16 +43,15 @@ def region_of_interest(edges):
 
     polygon = np.array([[
         (0, height),
-        (0, height / 2),
-        (width, height / 2),
+        (0, height * 0.3),
+        (width, height * 0.3),
         (width, height),
     ]], np.int32)
-    
+
     cv2.fillPoly(mask, polygon, 255)
-    
+
     cropped_edges = cv2.bitwise_and(edges, mask)
-    cv2.imshow("roi",cropped_edges)
-    
+
     return cropped_edges
 
 def detect_line_segments(cropped_edges):
@@ -102,6 +63,98 @@ def detect_line_segments(cropped_edges):
                                     np.array([]), minLineLength=2, maxLineGap=150)
 
     return line_segments
+
+def thicken_lines(edges):
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    thickened = cv2.dilate(edges, kernel, iterations=2)
+    thickened = cv2.morphologyEx(thickened, cv2.MORPH_CLOSE, kernel, iterations=1)
+    return thickened
+
+def detect_lane_curves(edges):
+    height, width = edges.shape
+    roi_top = int(height * 0.35)
+
+    roi_edges = edges[roi_top:, :]
+    roi_height, roi_width = roi_edges.shape
+
+    histogram = np.sum(roi_edges[roi_height // 2:, :], axis=0)
+    midpoint = histogram.shape[0] // 2
+    left_base = np.argmax(histogram[:midpoint])
+    right_base = np.argmax(histogram[midpoint:]) + midpoint
+
+    if histogram[left_base] < 30:
+        left_base = int(width * 0.15)
+    if histogram[right_base] < 30:
+        right_base = int(width * 0.85)
+
+    nwindows = 10
+    window_height = roi_height // nwindows
+    margin = 30
+    min_pixels = 15
+
+    leftx_current = left_base
+    rightx_current = right_base
+
+    left_lane_inds = []
+    right_lane_inds = []
+
+    nonzero = roi_edges.nonzero()
+    nonzerox = np.array(nonzero[1])
+    nonzeros = np.array(nonzero[0])
+
+    for window in range(nwindows):
+        win_y_low = roi_height - (window + 1) * window_height
+        win_y_high = roi_height - window * window_height
+
+        win_xleft_low = max(0, leftx_current - margin)
+        win_xleft_high = min(roi_width, leftx_current + margin)
+        win_xright_low = max(0, rightx_current - margin)
+        win_xright_high = min(roi_width, rightx_current + margin)
+
+        good_left_inds = ((nonzeros >= win_y_low) & (nonzeros < win_y_high) &
+                         (nonzerox >= win_xleft_low) & (nonzerox < win_xleft_high)).nonzero()[0]
+        good_right_inds = ((nonzeros >= win_y_low) & (nonzeros < win_y_high) &
+                          (nonzerox >= win_xright_low) & (nonzerox < win_xright_high)).nonzero()[0]
+
+        left_lane_inds.append(good_left_inds)
+        right_lane_inds.append(good_right_inds)
+
+        if len(good_left_inds) > min_pixels:
+            leftx_current = int(np.mean(nonzerox[good_left_inds]))
+        if len(good_right_inds) > min_pixels:
+            rightx_current = int(np.mean(nonzerox[good_right_inds]))
+
+    left_lane_inds = np.concatenate(left_lane_inds) if left_lane_inds else np.array([])
+    right_lane_inds = np.concatenate(right_lane_inds) if right_lane_inds else np.array([])
+
+    leftx = nonzerox[left_lane_inds] if len(left_lane_inds) > 0 else np.array([])
+    lefty = nonzeros[left_lane_inds] if len(left_lane_inds) > 0 else np.array([])
+    rightx = nonzerox[right_lane_inds] if len(right_lane_inds) > 0 else np.array([])
+    righty = nonzeros[right_lane_inds] if len(right_lane_inds) > 0 else np.array([])
+
+    left_fit = np.polyfit(lefty, leftx, 2) if len(leftx) > 3 else None
+    right_fit = np.polyfit(righty, rightx, 2) if len(rightx) > 3 else None
+
+    left_curve = None
+    right_curve = None
+
+    if left_fit is not None:
+        ploty = np.linspace(0, roi_height - 1, roi_height)
+        left_fitx = left_fit[0] * ploty**2 + left_fit[1] * ploty + left_fit[2]
+        left_curve = []
+        for i in range(0, len(ploty), 5):
+            if 0 <= left_fitx[i] < roi_width:
+                left_curve.append((int(left_fitx[i]), int(ploty[i]) + roi_top))
+
+    if right_fit is not None:
+        ploty = np.linspace(0, roi_height - 1, roi_height)
+        right_fitx = right_fit[0] * ploty**2 + right_fit[1] * ploty + right_fit[2]
+        right_curve = []
+        for i in range(0, len(ploty), 5):
+            if 0 <= right_fitx[i] < roi_width:
+                right_curve.append((int(right_fitx[i]), int(ploty[i]) + roi_top))
+
+    return left_curve, right_curve
 
 def detect_lane_lines_full(edges, frame):
     height, width = edges.shape
@@ -118,21 +171,12 @@ def detect_lane_lines_full(edges, frame):
         return []
 
     lane_lines = []
-    bottom_threshold = height * 0.85
 
     for line in lines:
         for x1, y1, x2, y2 in line:
             line_length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
             if line_length < min_line_length:
-                continue
-
-            if y1 < bottom_threshold and y2 < bottom_threshold:
-                continue
-
-            starts_from_bottom = (y1 >= bottom_threshold or y2 >= bottom_threshold)
-
-            if not starts_from_bottom:
                 continue
 
             if x1 == x2:
@@ -146,111 +190,6 @@ def detect_lane_lines_full(edges, frame):
             lane_lines.append([[x1, y1, x2, y2]])
 
     return lane_lines
-
-def get_lane_curves(edges):
-    height, width = edges.shape
-    roi_top = int(height * 0.4)
-    roi_bottom = height
-
-    roi_edges = edges[roi_top:roi_bottom, :]
-    roi_height, roi_width = roi_edges.shape
-
-    histogram = np.sum(roi_edges[roi_edges.shape[0]//2:, :], axis=0)
-
-    midpoint = histogram.shape[0] // 2
-    left_base = np.argmax(histogram[:midpoint])
-    right_base = np.argmax(histogram[midpoint:]) + midpoint
-
-    if histogram[left_base] < 50:
-        left_base = int(width * 0.2)
-    if histogram[right_base] < 50:
-        right_base = int(width * 0.8)
-
-    nwindows = 12
-    window_height = roi_height // nwindows
-    margin = 25
-    min_pixels = 10
-
-    leftx_current = left_base
-    rightx_current = right_base
-
-    left_lane_inds = []
-    right_lane_inds = []
-
-    nonzero = roi_edges.nonzero()
-    nonzerox = np.array(nonzero[1])
-    nonzeros = np.array(nonzero[0])
-
-    for window in range(nwindows):
-        win_y_low = roi_height - (window + 1) * window_height
-        win_y_high = roi_height - window * window_height
-
-        win_xleft_low = leftx_current - margin
-        win_xleft_high = leftx_current + margin
-        win_xright_low = rightx_current - margin
-        win_xright_high = rightx_current + margin
-
-        good_left_inds = ((nonzeros >= win_y_low) & (nonzeros < win_y_high) &
-                         (nonzerox >= win_xleft_low) & (nonzerox < win_xleft_high)).nonzero()[0]
-        good_right_inds = ((nonzeros >= win_y_low) & (nonzeros < win_y_high) &
-                          (nonzerox >= win_xright_low) & (nonzerox < win_xright_high)).nonzero()[0]
-
-        left_lane_inds.append(good_left_inds)
-        right_lane_inds.append(good_right_inds)
-
-        if len(good_left_inds) > min_pixels:
-            leftx_current = int(np.mean(nonzerox[good_left_inds]))
-        if len(good_right_inds) > min_pixels:
-            rightx_current = int(np.mean(nonzerox[good_right_inds]))
-
-    left_lane_inds = np.concatenate(left_lane_inds) if len(left_lane_inds) > 0 else np.array([])
-    right_lane_inds = np.concatenate(right_lane_inds) if len(right_lane_inds) > 0 else np.array([])
-
-    leftx = nonzerox[left_lane_inds] if len(left_lane_inds) > 0 else np.array([])
-    lefty = nonzeros[left_lane_inds] if len(left_lane_inds) > 0 else np.array([])
-    rightx = nonzerox[right_lane_inds] if len(right_lane_inds) > 0 else np.array([])
-    righty = nonzeros[right_lane_inds] if len(right_lane_inds) > 0 else np.array([])
-
-    left_fit = np.polyfit(lefty, leftx, 2) if len(leftx) > 3 else None
-    right_fit = np.polyfit(righty, rightx, 2) if len(rightx) > 3 else None
-
-    curves = []
-    if left_fit is not None:
-        for y in range(0, roi_height, 5):
-            x = int(left_fit[0] * y**2 + left_fit[1] * y + left_fit[2])
-            if 0 <= x < roi_width:
-                curves.append((int(x), int(y + roi_top)))
-
-    if right_fit is not None:
-        for y in range(0, roi_height, 5):
-            x = int(right_fit[0] * y**2 + right_fit[1] * y + right_fit[2])
-            if 0 <= x < roi_width:
-                curves.append((int(x), int(y + roi_top)))
-
-    return curves
-
-def draw_lane_curves(frame, edges, curves):
-    result = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
-
-    height, width = edges.shape
-    roi_top = int(height * 0.5)
-    roi_bottom = height
-    roi_left = int(width * 0.1)
-    roi_right = int(width * 0.9)
-    roi_width = roi_right - roi_left
-
-    for x, y in curves:
-        if roi_left <= x <= roi_right and roi_top <= y <= roi_bottom:
-            cv2.circle(result, (x, y), 2, (0, 255, 255), -1)
-
-    for i in range(len(curves) - 1):
-        x1, y1 = curves[i]
-        x2, y2 = curves[i + 1]
-        if abs(y2 - y1) < 20:
-            cv2.line(result, (x1, y1), (x2, y2), (0, 255, 255), 2)
-
-    result = cv2.addWeighted(frame, 0.5, result, 0.5, 0)
-    return result
 
 def average_slope_intercept(frame, line_segments):
     lane_lines = []
@@ -317,26 +256,57 @@ def display_lines(frame, lines, line_color=(0, 255, 0), line_width=6):
     if lines is None or len(lines) == 0:
         return cv2.addWeighted(frame, 0.8, line_image, 1, 1)
 
-    for line in lines:
-        if line is None or len(line) == 0:
-            continue
-        for x1, y1, x2, y2 in line:
-            if not all(isinstance(v, (int, float)) for v in [x1, y1, x2, y2]):
+    if isinstance(lines, tuple) and len(lines) == 2:
+        left_curve, right_curve = lines
+        if left_curve:
+            for i in range(len(left_curve) - 1):
+                x1, y1 = left_curve[i]
+                x2, y2 = left_curve[i + 1]
+                cv2.line(line_image, (x1, y1), (x2, y2), line_color, line_width)
+        if right_curve:
+            for i in range(len(right_curve) - 1):
+                x1, y1 = right_curve[i]
+                x2, y2 = right_curve[i + 1]
+                cv2.line(line_image, (x1, y1), (x2, y2), line_color, line_width)
+    else:
+        for line in lines:
+            if line is None or len(line) == 0:
                 continue
-            cv2.line(line_image, (int(x1), int(y1)), (int(x2), int(y2)), line_color, line_width)
+            for x1, y1, x2, y2 in line:
+                if not all(isinstance(v, (int, float)) for v in [x1, y1, x2, y2]):
+                    continue
+                cv2.line(line_image, (int(x1), int(y1)), (int(x2), int(y2)), line_color, line_width)
 
     line_image = cv2.addWeighted(frame, 0.8, line_image, 1, 1)
 
     return line_image
 
-def display_heading_line(frame, lane_lines, steering_angle, line_color=(0, 0, 255), line_width=5):
+def display_heading_line(frame, lane_input, steering_angle, line_color=(0, 0, 255), line_width=5):
     heading_image = np.zeros_like(frame)
     height, width, _ = frame.shape
 
-    if lane_lines is not None and len(lane_lines) >= 2:
-        left_line = lane_lines[0][0]
-        right_line = lane_lines[1][0]
-        
+    if isinstance(lane_input, tuple) and len(lane_input) == 2:
+        left_curve, right_curve = lane_input
+        left_pts = left_curve if left_curve else []
+        right_pts = right_curve if right_curve else []
+
+        if left_pts and right_pts:
+            combined = list(left_pts) + list(right_pts)
+            combined.sort(key=lambda p: p[1], reverse=True)
+
+            prev_x = None
+            for i in range(len(combined) - 1):
+                x1, y1 = combined[i]
+                x2, y2 = combined[i + 1]
+                if abs(y1 - y2) < 30 and abs(x1 - x2) < 100:
+                    cv2.line(heading_image, (x1, y1), (x2, y2), line_color, line_width)
+
+            heading_image = cv2.addWeighted(frame, 0.8, heading_image, 1, 1)
+
+    elif lane_input is not None and len(lane_input) >= 2:
+        left_line = lane_input[0][0]
+        right_line = lane_input[1][0]
+
         prev_x = None
         for y in range(height, int(height * 0.3), -5):
             if len(left_line) == 6 and len(right_line) == 6:
@@ -347,27 +317,27 @@ def display_heading_line(frame, lane_lines, steering_angle, line_color=(0, 0, 25
             else:
                 x1_l, y1_l, x2_l, y2_l = left_line[:4]
                 x1_r, y1_r, x2_r, y2_r = right_line[:4]
-                
+
                 slope_l = (y2_l - y1_l) / (x2_l - x1_l) if x2_l != x1_l else 0.001
                 slope_r = (y2_r - y1_r) / (x2_r - x1_r) if x2_r != x1_r else 0.001
-                
+
                 intercept_l = y1_l - slope_l * x1_l
                 intercept_r = y1_r - slope_r * x1_r
-                
+
                 x_left = int((y - intercept_l) / slope_l)
                 x_right = int((y - intercept_r) / slope_r)
-            
+
             x_center = (x_left + x_right) // 2
-            
+
             if prev_x is not None and abs(x_center - prev_x) < 50:
                 cv2.line(heading_image, (prev_x, y + 5), (x_center, y), line_color, line_width)
-            
+
             prev_x = x_center
-        
+
         heading_image = cv2.addWeighted(frame, 0.8, heading_image, 1, 1)
-    elif lane_lines is not None and len(lane_lines) == 1:
+    elif lane_input is not None and len(lane_input) == 1:
         heading_image = frame.copy()
-        line = lane_lines[0][0]
+        line = lane_input[0][0]
         
         if len(line) == 6:
             a, b = line[4], line[5]
@@ -416,36 +386,55 @@ def combine_windows_2x2(img1, img2, img3, img4, labels=None):
 
     return combined
 
-def get_steering_angle(frame, lane_lines):
+def get_steering_angle(frame, lane_input):
 
-    height,width,_ = frame.shape
+    height, width, _ = frame.shape
 
-    global curve_or_intersection_detected
+    if isinstance(lane_input, tuple) and len(lane_input) == 2:
+        left_curve, right_curve = lane_input
+        if left_curve and right_curve:
+            left_pts = [(p[0], p[1]) for p in left_curve]
+            right_pts = [(p[0], p[1]) for p in right_curve]
+            left_bottom = max(left_pts, key=lambda p: p[1])
+            right_bottom = max(right_pts, key=lambda p: p[1])
+            lane_center_x = (left_bottom[0] + right_bottom[0]) / 2
+        elif left_curve:
+            left_pts = [(p[0], p[1]) for p in left_curve]
+            left_bottom = max(left_pts, key=lambda p: p[1])
+            lane_center_x = left_bottom[0] + width * 0.2
+        elif right_curve:
+            right_pts = [(p[0], p[1]) for p in right_curve]
+            right_bottom = max(right_pts, key=lambda p: p[1])
+            lane_center_x = right_bottom[0] - width * 0.2
+        else:
+            lane_center_x = width / 2
+        x_offset = lane_center_x - width / 2
+        y_offset = height / 2
 
-    if len(lane_lines) == 2:
-        x1_left, y1_left, x2_left, y2_left = lane_lines[0][0]
-        x1_right, y1_right, x2_right, y2_right = lane_lines[1][0]
+    elif isinstance(lane_input, list) and len(lane_input) >= 2:
+        left_line = lane_input[0]
+        right_line = lane_input[1]
+        if len(left_line) > 0 and len(right_line) > 0:
+            left_x2 = left_line[0][2]
+            right_x2 = right_line[0][2]
+            lane_center_x = (left_x2 + right_x2) / 2
+        elif len(left_line) > 0:
+            lane_center_x = left_line[0][2] + width * 0.2
+        elif len(right_line) > 0:
+            lane_center_x = right_line[0][2] - width * 0.2
+        else:
+            lane_center_x = width / 2
+        x_offset = lane_center_x - width / 2
+        y_offset = height / 2
 
-        slope_left = (y2_left - y1_left) / (x2_left - x1_left) if x2_left != x1_left else 0
-        slope_right = (y2_right - y1_right) / (x2_right - x1_right) if x2_right != x1_right else 0
-
-        if slope_left > 0.3 or slope_right < -0.3:
-            curve_or_intersection_detected = True
-
-        _, _, left_x2, _ = lane_lines[0][0]
-        _, _, right_x2, _ = lane_lines[1][0]
-        mid = int(width / 2)
-        x_offset = (left_x2 + right_x2) / 2 - mid
-        y_offset = int(height / 2)
-
-    elif len(lane_lines) == 1:
-        x1, _, x2, _ = lane_lines[0][0]
+    elif isinstance(lane_input, list) and len(lane_input) == 1:
+        x1, y1, x2, y2 = lane_input[0][0]
         x_offset = x2 - x1
-        y_offset = int(height / 2)
+        y_offset = height / 2
 
     else:
         x_offset = 0
-        y_offset = int(height / 2)
+        y_offset = height / 2
 
     angle_to_mid_radian = math.atan(x_offset / y_offset)
     angle_to_mid_deg = int(angle_to_mid_radian * 180.0 / math.pi)
@@ -462,9 +451,7 @@ FRAME_BUFFER_SIZE = 3
 steering_history = []
 STEERING_HISTORY_SIZE = 3
 
-curve_or_intersection_detected = False
-curve_frame_count = 0
-CURVE_DETECT_FRAMES = 3
+last_valid_command = "FORWARD"
 
 video = cv2.VideoCapture(stream_url)
 video.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
@@ -476,23 +463,10 @@ video.set(cv2.CAP_PROP_GAIN, 1.0)
 
 time.sleep(1)
 
-##fourcc = cv2.VideoWriter_fourcc(*'XVID')
-##out = cv2.VideoWriter('Original15.avi',fourcc,10,(320,240))
-##out2 = cv2.VideoWriter('Direction15.avi',fourcc,10,(320,240))
-
-speed = 8
-lastTime = 0
-lastError = 0
-
-kp = 0.4
-kd = kp * 0.65
-
 while True:
     ret, frame = video.read()
     if not ret or frame is None or frame.size == 0:
         continue
-
-    curve_or_intersection_detected = False
 
     if CAMERA_BRIGHTNESS_GAIN != 1.0:
         frame = np.clip(frame * CAMERA_BRIGHTNESS_GAIN, 0, 255).astype(np.uint8)
@@ -506,35 +480,26 @@ while True:
 
     cv2.imshow("original", frame)
     edges = detect_edges(frame)
-    roi = region_of_interest(edges)
-    lane_lines = detect_lane_lines_full(edges, frame)
-    lane_lines = average_slope_intercept(frame, lane_lines)
+    solid_edges = thicken_lines(edges)
+    roi = region_of_interest(solid_edges)
+    lane_curves = detect_lane_curves(solid_edges)
 
-    lane_curves = get_lane_curves(edges)
-    edges_with_curves = draw_lane_curves(frame, edges, lane_curves)
-    cv2.imshow("edges_with_curves", edges_with_curves)
-
-    lane_history.append(lane_lines)
+    lane_history.append(lane_curves)
     if len(lane_history) > LANE_HISTORY_SIZE:
         lane_history.pop(0)
 
     if len(lane_history) >= 3:
-        valid_count = sum(1 for ll in lane_history if len(ll) >= 2)
+        valid_count = sum(1 for lc in lane_history if lc[0] is not None or lc[1] is not None)
         if valid_count >= 2:
-            avg_lane_lines = []
-            for i in range(2):
-                line_points = [lane_history[j][i] for j in range(len(lane_history)) if len(lane_history[j]) > i]
-                if line_points:
-                    x_coords = [p[0][0] for p in line_points] + [p[0][2] for p in line_points]
-                    y_coords = [p[0][1] for p in line_points] + [p[0][3] for p in line_points]
-                    if len(set(x_coords)) > 1 and len(set(y_coords)) > 1:
-                        z = np.polyfit(x_coords, y_coords, 1)
-                        avg_lane_lines.append(make_points(frame, z))
-            if len(avg_lane_lines) == 2:
-                lane_lines = avg_lane_lines
+            left_curves = [lc[0] for lc in lane_history if lc[0] is not None]
+            right_curves = [lc[1] for lc in lane_history if lc[1] is not None]
+            avg_left = left_curves[len(left_curves) // 2] if left_curves else None
+            avg_right = right_curves[len(right_curves) // 2] if right_curves else None
+            if avg_left or avg_right:
+                lane_curves = (avg_left, avg_right)
 
-    lane_lines_image = display_lines(frame,lane_lines)
-    steering_angle = get_steering_angle(frame, lane_lines)
+    lane_lines_image = display_lines(frame, lane_curves)
+    steering_angle = get_steering_angle(frame, lane_curves)
 
     steering_history.append(steering_angle)
     if len(steering_history) > STEERING_HISTORY_SIZE:
@@ -542,83 +507,48 @@ while True:
 
     smoothed_steering = int(np.mean(steering_history))
 
-    heading_image = display_heading_line(lane_lines_image, lane_lines, smoothed_steering)
-    # cv2.imshow("heading line", heading_image)
+    heading_image = display_heading_line(lane_lines_image, lane_curves, smoothed_steering)
 
-    combined = combine_windows_2x2(frame, edges_with_curves, roi, heading_image)
+    combined = combine_windows_2x2(frame, edges, solid_edges, heading_image)
     cv2.imshow("Lane Keeping (2x2)", combined)
 
-    now = time.time()
-    dt = now - lastTime
-
     deviation = smoothed_steering - 90
-    error = abs(deviation)
 
-    curvature = abs(deviation) / 90.0
-    base_speed = 8
+    if abs(deviation) > 45:
+        print(f"[KEEP] red_line_angle={smoothed_steering}, deviation={deviation}, keep={last_valid_command}")
+        try:
+            response = requests.post(control_url, json={'command': last_valid_command}, timeout=1)
+        except Exception as e:
+            print(f"Connection error: {e}")
 
-    if curve_or_intersection_detected:
-        speed = 4
-        curve_frame_count += 1
-        if curve_frame_count > CURVE_DETECT_FRAMES:
-            curve_or_intersection_detected = False
-            curve_frame_count = 0
-    else:
-        speed_reduction = min(curvature * 5, 4)
-        speed = max(base_speed - speed_reduction, 4)
-    
-    if deviation < 5 and deviation > -5:
-        deviation = 0
-        error = 0
-        response = requests.post(control_url, json={'command': "FORWARD"})
-        print("Forward")
-        # GPIO.output(in1,GPIO.LOW)
-        # GPIO.output(in2,GPIO.LOW)
-        # steering.stop()
+    elif abs(deviation) < 5:
+        last_valid_command = "FORWARD"
+        print(f"[FORWARD] red_line_angle={smoothed_steering}, deviation={deviation}")
+        try:
+            response = requests.post(control_url, json={'command': "FORWARD"}, timeout=1)
+        except Exception as e:
+            print(f"Connection error: {e}")
 
     elif deviation > 5:
-        response = requests.post(control_url, json={'command': "RIGHT"})
-        print("Turn right")
-        # GPIO.output(in1,GPIO.LOW)
-        # GPIO.output(in2,GPIO.HIGH)
-        # steering.start(100)
-        
+        last_valid_command = "RIGHT"
+        print(f"[RIGHT] red_line_angle={smoothed_steering}, deviation={deviation}")
+        try:
+            response = requests.post(control_url, json={'command': "RIGHT"}, timeout=1)
+        except Exception as e:
+            print(f"Connection error: {e}")
 
     elif deviation < -5:
-        response = requests.post(control_url, json={'command': "LEFT"})
-        print("Turn left")
-        # GPIO.output(in1,GPIO.HIGH)
-        # GPIO.output(in2,GPIO.LOW)
-        # steering.start(100)
-
-    derivative = kd * (error - lastError) / dt
-    proportional = kp * error
-    PD = int(speed + derivative + proportional)
-    spd = abs(PD)
-
-    if spd > 25:
-        spd = 25
-        
-    # throttle.start(spd)
-
-    lastError = error
-    lastTime = time.time()
-        
-##    out.write(frame)
-##    out2.write(heading_image)
+        last_valid_command = "LEFT"
+        print(f"[LEFT] red_line_angle={smoothed_steering}, deviation={deviation}")
+        try:
+            response = requests.post(control_url, json={'command': "LEFT"}, timeout=1)
+        except Exception as e:
+            print(f"Connection error: {e}")
 
     key = cv2.waitKey(1)
     if key == 27:
         break
     
 video.release()
-##out.release()
-##out2.release()
 cv2.destroyAllWindows()
-# GPIO.output(in1,GPIO.LOW)
-# GPIO.output(in2,GPIO.LOW)
-# GPIO.output(in3,GPIO.LOW)
-# GPIO.output(in4,GPIO.LOW)
-# throttle.stop()
-# steering.stop()
 
