@@ -1,0 +1,15 @@
+1. ssh开两个树莓派终端，开一个电脑终端
+
+2. 第一个终端开摄像头，运行：
+
+cd mjpg-streamer/mjpg-streamer-experimental./mjpg_streamer -i "./input_uvc.so -d /dev/video0 -r 640x480 -f 10" -o "./output_http.so -w ./www"
+
+3. 第二个终端依次运行
+
+cd GREATPROJECT/
+
+colcon build --symlink-install
+
+source install/setup.bash
+
+ros2 run yolo yolo_control
