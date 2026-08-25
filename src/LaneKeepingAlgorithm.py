@@ -14,6 +14,62 @@ control_url = "http://172.20.10.5:5000/control"
 
 CAMERA_BRIGHTNESS_GAIN = 1.1
 
+def get_hsv_mask(frame):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(4, 4))
+    hsv[:, :, 2] = clahe.apply(hsv[:, :, 2])
+
+    lower_white = np.array([0, 0, 180])
+    upper_white = np.array([180, 40, 255])
+    hsv_mask = cv2.inRange(hsv, lower_white, upper_white)
+
+    bgr_lower_white = np.array([180, 180, 180])
+    bgr_upper_white = np.array([255, 255, 255])
+    rgb_mask = cv2.inRange(frame, bgr_lower_white, bgr_upper_white)
+
+    mask = cv2.bitwise_and(hsv_mask, rgb_mask)
+
+    mask = cv2.GaussianBlur(mask, (5, 5), 0)
+
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+
+    return mask
+
+def validate_curves_with_hsv(lane_curves, hsv_mask, search_radius=10, min_valid_ratio=0.3):
+    left_curve, right_curve = lane_curves
+    height, width = hsv_mask.shape
+
+    def validate_single_curve(curve):
+        if curve is None:
+            return None
+
+        valid_points = []
+        for x, y in curve:
+            if 0 <= y < height and 0 <= x < width:
+                x_min = max(0, x - search_radius)
+                x_max = min(width, x + search_radius + 1)
+                y_min = max(0, y - search_radius)
+                y_max = min(height, y + search_radius + 1)
+
+                region = hsv_mask[y_min:y_max, x_min:x_max]
+                white_ratio = np.count_nonzero(region) / region.size if region.size > 0 else 0
+
+                if white_ratio >= min_valid_ratio:
+                    valid_points.append((x, y))
+
+        if len(valid_points) < 3:
+            return None
+
+        return valid_points
+
+    validated_left = validate_single_curve(left_curve)
+    validated_right = validate_single_curve(right_curve)
+
+    return (validated_left, validated_right)
+
 def detect_edges(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
@@ -22,7 +78,13 @@ def detect_edges(frame):
 
     lower_white = np.array([0, 0, 180])
     upper_white = np.array([180, 40, 255])
-    mask = cv2.inRange(hsv, lower_white, upper_white)
+    hsv_mask = cv2.inRange(hsv, lower_white, upper_white)
+
+    bgr_lower_white = np.array([180, 180, 180])
+    bgr_upper_white = np.array([255, 255, 255])
+    rgb_mask = cv2.inRange(frame, bgr_lower_white, bgr_upper_white)
+
+    mask = cv2.bitwise_and(hsv_mask, rgb_mask)
 
     mask = cv2.GaussianBlur(mask, (5, 5), 0)
 
@@ -479,10 +541,12 @@ while True:
         frame = np.mean(frame_buffer, axis=0).astype(np.uint8)
 
     cv2.imshow("original", frame)
+    hsv_mask = get_hsv_mask(frame)
     edges = detect_edges(frame)
     solid_edges = thicken_lines(edges)
     roi = region_of_interest(solid_edges)
     lane_curves = detect_lane_curves(solid_edges)
+    lane_curves = validate_curves_with_hsv(lane_curves, hsv_mask)
 
     lane_history.append(lane_curves)
     if len(lane_history) > LANE_HISTORY_SIZE:
@@ -509,7 +573,10 @@ while True:
 
     heading_image = display_heading_line(lane_lines_image, lane_curves, smoothed_steering)
 
-    combined = combine_windows_2x2(frame, edges, solid_edges, heading_image)
+    edges_with_lanes = display_lines(cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR), lane_curves)
+    roi_with_lanes = display_lines(cv2.cvtColor(roi, cv2.COLOR_GRAY2BGR), lane_curves)
+
+    combined = combine_windows_2x2(frame, edges_with_lanes, roi_with_lanes, heading_image)
     cv2.imshow("Lane Keeping (2x2)", combined)
 
     deviation = smoothed_steering - 90
