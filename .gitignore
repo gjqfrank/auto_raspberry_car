@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# gitee 原仓库 .git 的本地备份（已改为普通文件夹推送到 GitHub）
+yolo-fastest-v2-ncnn-raspberry-pi-4/.gitee-repo-backup/
